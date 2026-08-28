@@ -17,6 +17,14 @@ After the package is published to npm, add it to the `web` profile:
 dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
 ```
 
+To install the tagged source directly from GitHub:
+
+```sh
+dsh plugin --profile web add github:benz-ai-x/dsh-session-graph#v0.1.0
+```
+
+pnpm blocks a git dependency's `prepare` script until the profile explicitly permits it. The first GitHub install exits with `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`; copy the exact key printed by dsh into `$DSH_HOME/profiles/web/pnpm-workspace.yaml` under `allowBuilds`, then rerun the command. This permission executes package code outside the agent sandbox, so inspect the source and pin a tag or commit.
+
 The package contains both the browser plugin and its `cordis.patch.yml` bundle patch. The dsh plugin manager inserts it after the Session, Workspace, locale, renderer, and conversation plugins already supplied by the `web` profile. No manual `cordis.yml` edit is required.
 
 Remove it with:
@@ -24,6 +32,8 @@ Remove it with:
 ```sh
 dsh plugin --profile web remove @benz-ai-x/dsh-client-ui-session-graph
 ```
+
+Restart the target `web` profile after installation or removal. A running process does not watch its profile dependency list.
 
 The first release targets DeepSeek Harness `0.1.2-alpha.1`. The plugin intentionally does not install unpublished `@deepseek-ai/*` packages into its own dependency tree; those services and browser modules belong to the selected dsh profile.
 
@@ -55,11 +65,21 @@ pnpm run check
 DSH_HARNESS_ROOT=/path/to/deepseek-harness pnpm test:harness
 ```
 
+CI runs the standalone check on Node.js 22.19, 24, and 26. Its compatibility job checks out `deepseek-ai/deepseek-harness` at `dsh-v0.1.2-alpha.1`, runs the Harness integration suite, and verifies that the packed archive enters and leaves a scratch `web` profile cleanly.
+
 Build an installable archive with:
 
 ```sh
 pnpm pack
 ```
+
+### Release
+
+The [Publish workflow](.github/workflows/publish.yml) accepts a published GitHub Release or a manually supplied existing tag. It requires the tag to equal `v` plus the package version, reruns `pnpm run check`, packs the archive, and publishes those verified bytes under npm tag `latest` for stable versions or `next` for prereleases.
+
+Configure the GitHub environment `npm-publish` before publishing. If the package does not exist on npm yet, add a narrowly scoped `NPM_TOKEN` repository secret for the initial publication. Then configure an [npm trusted publisher](https://docs.npmjs.com/trusted-publishers/) for organization `benz-ai-x`, repository `dsh-session-graph`, workflow `publish.yml`, environment `npm-publish`, and the `npm publish` action; remove the long-lived secret after trusted publishing succeeds.
+
+For a new version, update `package.json`, merge the change, create the matching immutable `v<version>` tag, and publish a GitHub Release. To publish an existing tag such as `v0.1.0`, run the Publish workflow manually and pass that tag.
 
 The package exports two host entries and one lazy browser module:
 
