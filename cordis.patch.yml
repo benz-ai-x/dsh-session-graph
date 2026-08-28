@@ -1,0 +1,4 @@
+# Optional Web Profile Bundle: add the workspace session graph view.
+- insert:
+    - id: ui-session-graph
+      name: '@benz-ai-x/dsh-client-ui-session-graph'

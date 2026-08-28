@@ -1,0 +1,578 @@
+/* Session-graph tab chrome and canvas. Semantic alias tokens only — the
+   theme package owns every literal color; light/dark branches live there. */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: none;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--dsw-alias-border-l);
+}
+
+.count {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.legendLineDashed {
+  display: inline-block;
+  width: 18px;
+  border-top: 1px solid var(--dsw-alias-label-tertiary);
+  border-top-style: dashed;
+}
+
+/* A short solid line with a CSS triangle head: the derivation sample. */
+.legendLineArrow {
+  display: inline-block;
+  width: 18px;
+  height: 1px;
+  background: var(--dsw-alias-brand-primary);
+  position: relative;
+}
+
+.legendLineArrow::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  top: -2.5px;
+  border-left: 5px solid var(--dsw-alias-brand-primary);
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+}
+
+.node:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+
+.viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+  background-color: var(--dsw-alias-bg-layer-1);
+  /* ConversationRoot publishes the floating composer's live height. */
+  margin-bottom: calc(var(--dsh-composer-height, 152px) + 16px);
+}
+
+.viewport:active {
+  cursor: grabbing;
+}
+
+.content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+/* Programmatic jumps (fit, locate, 100%) glide; gestures stay immediate. */
+@media (prefers-reduced-motion: no-preference) {
+  .animated {
+    transition: transform 240ms ease;
+  }
+}
+
+.controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base);
+  border: 1px solid var(--dsw-alias-border-l);
+}
+
+.controls button {
+  font-size: 12px;
+  min-width: 28px;
+  padding: 3px 8px;
+  color: var(--dsw-alias-label-secondary);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.controls button:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-overlay);
+}
+
+.controls button:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+.filterBox {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base);
+  border: 1px solid var(--dsw-alias-border-l);
+}
+
+.filterInput {
+  width: 150px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  background: none;
+  border: none;
+  outline: none;
+}
+
+.filterInput::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.filterStatus {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+}
+
+.filterBox button {
+  flex: none;
+  min-width: 22px;
+  padding: 2px 6px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.filterBox button:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-overlay);
+}
+
+.filterBox button:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+.frame {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 10px;
+  pointer-events: none;
+  background: var(--dsw-alias-bg-overlay);
+  transition: opacity 160ms ease;
+  z-index: 0;
+}
+
+/* The grabbed cluster paints above overlapping frames (bring to front). */
+.frameRaised {
+  z-index: 1;
+}
+
+.frameTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px 0 8px;
+  border-radius: 9px 9px 0 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l);
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-secondary);
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.frameTitle:active {
+  cursor: grabbing;
+}
+
+/* The disclosure triangle at the label's left (VSCode convention): the
+   toggle never detaches from the title, however wide the frame. */
+.frameToggle {
+  flex: none;
+  width: 18px;
+  height: 22px;
+  font-size: 12px;
+  line-height: 1;
+  color: inherit;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.frameToggle:hover {
+  background: var(--dsw-alias-bg-overlay);
+}
+
+.frameToggle:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+/* The cluster's color accent: the same 8px dot the member nodes carry. */
+.frameSwatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.frameLabel {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.minimap {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-base);
+  opacity: 0.92;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.minimapFrame {
+  fill: var(--dsw-alias-bg-overlay);
+  stroke: var(--dsw-alias-border-l);
+  stroke-width: 1;
+}
+
+.minimapNode {
+  fill: var(--dsw-alias-label-secondary);
+}
+
+.minimapView {
+  fill: none;
+  stroke: var(--dsw-alias-label-tertiary);
+  stroke-width: 1;
+}
+
+.edges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.edgeFork {
+  fill: none;
+  stroke: var(--dsw-alias-label-tertiary);
+  stroke-width: 1.5;
+}
+
+.edgeForkArrow {
+  stroke: var(--dsw-alias-label-tertiary);
+  stroke-width: 1.5;
+  fill: var(--dsw-alias-label-tertiary);
+}
+
+/* The invisible fat stroke that makes a thin dashed edge hoverable. */
+.edgeHit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14px;
+  pointer-events: stroke;
+}
+
+.edgeGroup {
+  transition: opacity 160ms ease;
+}
+
+.edgeHot .edgeFork {
+  stroke: var(--dsw-alias-brand-primary);
+  stroke-width: 2;
+}
+
+.edgeHot .edgeForkArrow {
+  stroke: var(--dsw-alias-brand-primary);
+  fill: var(--dsw-alias-brand-primary);
+}
+
+.dim {
+  opacity: 0.22;
+}
+
+.node {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 240px;
+  height: 44px;
+  box-sizing: border-box;
+  padding: 4px 10px;
+  text-align: left;
+  font: inherit;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base);
+  border: 1px solid var(--dsw-alias-label-secondary);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, opacity 160ms ease;
+}
+
+.node:hover {
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.node[aria-current='true'] {
+  border-color: var(--dsw-alias-brand-primary);
+  background: var(--dsw-alias-bg-overlay);
+}
+
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-dimmed);
+}
+
+@keyframes dshSessionGraphPulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--dsw-alias-bg-overlay); }
+  50% { box-shadow: 0 0 0 4px var(--dsw-alias-bg-overlay); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dotPulse {
+    animation: dshSessionGraphPulse 1.8s ease-in-out infinite;
+  }
+}
+
+.nodeSelected {
+  /* React Flow discipline: the border stays neutral, selection is a ring. */
+  box-shadow: 0 0 0 2px var(--dsw-alias-brand-primary);
+}
+
+.nodePending {
+  border-color: var(--dsw-alias-state-warn-primary);
+}
+
+.time {
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badge {
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badgeHovered {
+  border-color: var(--dsw-alias-brand-primary);
+  border-style: solid;
+}
+
+.edgeDerivation {
+  stroke: var(--dsw-alias-brand-primary);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+/* Drag-alignment guides: dashed lines through the snapped edges. */
+.guideX {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed var(--dsw-alias-brand-primary);
+  pointer-events: none;
+}
+
+.guideY {
+  position: absolute;
+  z-index: 4;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed var(--dsw-alias-brand-primary);
+  pointer-events: none;
+}
+
+.panel {
+  position: absolute;
+  right: 12px;
+  top: 60px;
+  width: 220px;
+  box-sizing: border-box;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-base);
+  border: 1px solid var(--dsw-alias-border-l);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.panelTitle {
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panelMeta {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.panelActions {
+  display: flex;
+  gap: 8px;
+}
+
+.panelActions button {
+  flex: 1;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l);
+  background: var(--dsw-alias-bg-overlay);
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.panelActions button:hover {
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.panelActions button:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 1px;
+}
+
+/* The hover detail card: screen-space, never swallows the pointer. */
+.preview {
+  position: absolute;
+  width: 240px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-base);
+  border: 1px solid var(--dsw-alias-border-l);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.previewTitle {
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+  overflow-wrap: anywhere;
+}
+
+.previewStatus {
+  font-size: 12px;
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.previewMeta {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.previewHint {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  transition: opacity 160ms ease;
+}
+
+/* Low-zoom level of detail: cards reduce to dot + chrome, text fades out. */
+.lowZoom .body {
+  opacity: 0;
+}
+
+.title {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.empty {
+  margin: auto;
+  padding: 48px 16px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-tertiary);
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .node,
+  .frame,
+  .edgeGroup,
+  .body {
+    transition: none;
+  }
+}
