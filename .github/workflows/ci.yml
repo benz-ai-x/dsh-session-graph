@@ -21,16 +21,15 @@ jobs:
       matrix:
         node: ['22.19.0', '24', '26']
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v6
+      - uses: pnpm/setup@v2
         with:
-          node-version: ${{ matrix.node }}
-          cache: pnpm
+          runtime: node@${{ matrix.node }}
+          cache: true
+          install: false
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm run check
@@ -41,26 +40,25 @@ jobs:
     name: DSH 0.1.2-alpha.1
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           repository: ${{ env.DSH_REPOSITORY }}
           ref: ${{ env.DSH_REF }}
           path: harness
           persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v6
+      - uses: pnpm/setup@v2
         with:
-          node-version: '24'
-          cache: pnpm
+          runtime: node@24
+          cache: true
           cache-dependency-path: |
             pnpm-lock.yaml
             harness/pnpm-lock.yaml
+          install: false
 
       - name: Install plugin dependencies
         run: pnpm install --frozen-lockfile
@@ -85,14 +83,14 @@ jobs:
           config_dump="$RUNNER_TEMP/dsh-session-graph-config.yml"
           pnpm --dir harness dsh plugin --profile web add "$plugin_archive"
           pnpm --dir harness dsh --profile web --dump-config > "$config_dump"
-          rg --fixed-strings "name: '@benz-ai-x/dsh-client-ui-session-graph'" "$config_dump"
+          grep -F "name: '@benz-ai-x/dsh-client-ui-session-graph'" "$config_dump"
           pnpm --dir harness dsh plugin --profile web remove @benz-ai-x/dsh-client-ui-session-graph
           pnpm --dir harness dsh --profile web --dump-config > "$config_dump"
-          if rg --fixed-strings "name: '@benz-ai-x/dsh-client-ui-session-graph'" "$config_dump"; then
+          if grep -Fq "name: '@benz-ai-x/dsh-client-ui-session-graph'" "$config_dump"; then
             echo 'packed plugin remained in the resolved config after removal' >&2
             exit 1
           fi
-          if rg --fixed-strings '@benz-ai-x/dsh-client-ui-session-graph' "$DSH_HOME/profiles/web/package.json"; then
+          if grep -Fq '@benz-ai-x/dsh-client-ui-session-graph' "$DSH_HOME/profiles/web/package.json"; then
             echo 'packed plugin remained in the profile after removal' >&2
             exit 1
           fi
