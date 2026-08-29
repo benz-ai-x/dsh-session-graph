@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { deriveSessionGraph, resolveWorkspaceScope } from '../src/client/graph-model.ts'
+import { deriveSessionGraph, resolveGraphScope } from '../src/client/graph-model.ts'
 import {
   CARD_H,
   CLUSTER_GAP,
@@ -48,7 +48,7 @@ function graphFor(byId: Record<string, SessionSummary>) {
     jobsBySession: {},
     currentAddress: undefined,
   }
-  const scope = resolveWorkspaceScope(id(Object.keys(byId)[0] ?? ''), list, {
+  const scope = resolveGraphScope(id(Object.keys(byId)[0] ?? ''), list, {
     items: [], archivedSessionIds: [], state: 'idle', phase: 'ready', error: null,
   })
   return deriveSessionGraph(list, scope, undefined, new Map())
@@ -106,12 +106,12 @@ describe('layoutSessionGraph', () => {
       b: session('b', { parentId: id('parent'), updatedAt: 200 }),
     }))
     // a takes column 0 and b column 1, so the parent centers at x=140
-    // (midpoint); the 76px vertical gap bends each control arm by the 40px
-    // floor (half of it, 38px, is below the floor).
+    // (midpoint); the 64px vertical gap bends each control arm by the 40px
+    // floor (half of it, 32px, is below the floor).
     const edgeA = laid.edges.find(entry => entry.edge.to === 'a')
-    expect(edgeA?.path).toBe('M 260 44 C 260 84, 120 80, 120 120')
+    expect(edgeA?.path).toBe('M 260 56 C 260 96, 120 80, 120 120')
     const edgeB = laid.edges.find(entry => entry.edge.to === 'b')
-    expect(edgeB?.path).toBe('M 260 44 C 260 84, 400 80, 400 120')
+    expect(edgeB?.path).toBe('M 260 56 C 260 96, 400 80, 400 120')
   })
 
   it('grows bounds with depth and column count', () => {
@@ -135,7 +135,7 @@ describe('layoutSessionGraph', () => {
 describe('empty graph', () => {
   it('lays out to zero extents with no nodes', () => {
     const list = listStateFor({ hidden: { ...session('hidden'), blank: true } })
-    const scope = resolveWorkspaceScope(id('hidden'), list, {
+    const scope = resolveGraphScope(id('hidden'), list, {
       items: [], archivedSessionIds: [], state: 'idle', phase: 'ready', error: null,
     })
     const laid = layoutSessionGraph(deriveSessionGraph(list, scope, undefined, new Map()))
@@ -186,7 +186,7 @@ describe('cluster vertical stacking', () => {
 describe('layoutSessionGraph fail-loud guards', () => {
   const emptyGraph = {
     clusters: [], nodes: new Map(), children: new Map(), edges: [],
-    workspaceLabel: undefined, sessionCount: 0,
+    sessionCount: 0,
   }
 
   it('throws when a cluster root references an underived node', () => {

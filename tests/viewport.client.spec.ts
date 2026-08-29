@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  SCALE_MAX, SCALE_MIN, clampScale, fitViewport, initialViewport, minimapProjection, panBy, zoomAt,
+  SCALE_MAX, SCALE_MIN, clampScale, fitViewport, initialViewport, minimapProjection, panBy,
+  resizeViewport, zoomAt,
 } from '../src/client/viewport.ts'
 
 describe('initialViewport', () => {
@@ -44,6 +45,21 @@ describe('panBy', () => {
   it('moves the pan by screen-space deltas without touching the scale', () => {
     const after = panBy({ scale: 2, panX: 10, panY: 10 }, -30, 45)
     expect(after).toEqual({ scale: 2, panX: -20, panY: 55 })
+  })
+})
+
+describe('resizeViewport', () => {
+  it('keeps the same content point at the center when the surface resizes', () => {
+    const before = { scale: 0.8, panX: 120, panY: -40 }
+    const previousSize = { width: 1000, height: 600 }
+    const nextSize = { width: 480, height: 700 }
+    const after = resizeViewport(before, previousSize, nextSize)
+
+    expect(after.scale).toBe(before.scale)
+    expect((nextSize.width / 2 - after.panX) / after.scale)
+      .toBeCloseTo((previousSize.width / 2 - before.panX) / before.scale)
+    expect((nextSize.height / 2 - after.panY) / after.scale)
+      .toBeCloseTo((previousSize.height / 2 - before.panY) / before.scale)
   })
 })
 

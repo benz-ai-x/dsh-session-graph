@@ -16,18 +16,22 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
   applyCollapse, applyOffsets, CLUSTER_COLORS, clusterFrames, contentBounds,
 } from './clusters.ts'
-import type { ClusterInfo } from './graph-model.ts'
-import { matchFilter, neighborhood } from './graph-model.ts'
+import type { ClusterInfo, DisplayStatus, GraphNode } from './graph-model.ts'
+import { branchLineage, matchFilter } from './graph-model.ts'
 import {
   applyPositions, CARD_H, NODE_W, type ContentBounds, type LaidOutGraph, type LaidOutNode,
 } from './layout.ts'
-import { type ClusterOffset, loadLayout, saveLayout, type NodePosition } from './layout-store.ts'
+import {
+  type ClusterOffset, loadArrangement, saveLayout, type NodePosition,
+  type SessionArrangementIdentity,
+} from './layout-store.ts'
 import type { SessionGraphKey } from './locales.ts'
+import { placePreview } from './preview-placement.ts'
 import { snapPosition } from './snap.ts'
 import type { GraphViewInjected } from './GraphView.tsx'
 import type { LaidOutFrame } from './clusters.ts'
 import {
-  fitViewport, initialViewport, minimapProjection, panBy, zoomAt,
+  fitViewport, initialViewport, minimapProjection, panBy, resizeViewport, zoomAt,
 } from './viewport.ts'
 import styles from './GraphView.module.css'
 
@@ -51,6 +55,12 @@ const SNAP_PX = 6
 const PREVIEW_DELAY = 400
 /** Node detail card width in screen px. */
 const PREVIEW_W = 240
+/** Conservative detail-card height used for collision-free placement. */
+const PREVIEW_H = 112
+/** Screen inset occupied by the filter and canvas controls. */
+const PREVIEW_TOP_INSET = 56
+/** Right-side canvas inset occupied by the Selected Session inspector. */
+const INSPECTOR_RIGHT_INSET = 304
 
 /** Restore one record key to its pre-gesture value, removing a previously absent key. */
 function restoreEntry<T>(
@@ -76,6 +86,14 @@ function timeLabel(updatedAt: number, now: number, t: Translate): string {
   return t('time.years', { n: Math.floor(diff / (365 * DAY)) })
 }
 
+/** Translate the single Display Status derived from overlapping activity facts. */
+function displayStatusLabel(status: DisplayStatus | undefined, t: Translate): string {
+  if (status === 'running') return t('preview.status.running')
+  if (status === 'waiting-input') return t('preview.status.pending')
+  if (status === 'completed') return t('preview.status.completed')
+  return ''
+}
+
 /** Node pointer-gesture callbacks owned by the canvas (drag + click routing). */
 interface NodeGestureHandlers {
   onPointerDown: (event: React.PointerEvent<HTMLElement>) => void
@@ -86,10 +104,10 @@ interface NodeGestureHandlers {
   onDoubleClick: () => void
 }
 
-/** One node card button: time-first, selected state, title caption, badge. */
+/** One Canvas Session card: title-first hierarchy, state, metadata, and terminals. */
 function NodeCard({
   laid, now, t, gestures, clusterColor, selected, onHoverBadge, badgeHovered,
-  dimmed, onHoverNode,
+  dimClass, onHoverNode,
 }: {
   laid: LaidOutNode
   now: number
@@ -99,7 +117,7 @@ function NodeCard({
   selected: boolean
   onHoverBadge: (key: string | null) => void
   badgeHovered: boolean
-  dimmed: boolean
+  dimClass: string | null | undefined
   onHoverNode: (key: string | null) => void
 }) {
   const { node, key, x, y } = laid
@@ -107,51 +125,143 @@ function NodeCard({
     ? `${t('node.subagents', { count: node.subagentCount })}${node.runningSubagents > 0 ? ` (${t('node.running', { count: node.runningSubagents })})` : ''}`
     : ''
   return (
-    <button
-      type="button"
-      className={clsx(
-        styles.node,
-        styles.sessionNode,
-        selected ? styles.nodeSelected : null,
-        node.pending ? styles.nodePending : null,
-        badgeHovered ? styles.badgeHovered : null,
-        dimmed ? styles.dim : null,
-      )}
-      style={{ left: `${x}px`, top: `${y}px` }}
-      data-node-id={key}
-      aria-current={node.current ? 'true' : undefined}
-      aria-selected={selected}
-      onPointerDown={gestures.onPointerDown}
-      onPointerMove={gestures.onPointerMove}
-      onPointerUp={gestures.onPointerUp}
-      onPointerCancel={gestures.onPointerCancel}
-      onClick={gestures.onClick}
-      onDoubleClick={gestures.onDoubleClick}
-      onMouseEnter={() => { onHoverNode(key) }}
-      onMouseLeave={() => { onHoverNode(null) }}
-    >
-      <span
-        className={clsx(styles.dot, node.running ? styles.dotPulse : null)}
-        style={{ background: `var(${clusterColor})` }}
-      />
-      <span className={styles.body}>
-        <span className={styles.time}>{timeLabel(node.updatedAt, now, t)}</span>
-        <span className={styles.title}>
-          {node.blank ? t('node.newSession') : node.title}
+    <>
+      <button
+        type="button"
+        className={clsx(
+          styles.node,
+          styles.sessionNode,
+          selected ? styles.nodeSelected : null,
+          node.displayStatus === 'waiting-input' ? styles.nodePending : null,
+          badgeHovered ? styles.badgeHovered : null,
+          dimClass,
+        )}
+        style={{ left: `${x}px`, top: `${y}px` }}
+        data-node-id={key}
+        data-display-status={node.displayStatus}
+        aria-current={node.viewed ? 'true' : undefined}
+        aria-selected={selected}
+        onPointerDown={gestures.onPointerDown}
+        onPointerMove={gestures.onPointerMove}
+        onPointerUp={gestures.onPointerUp}
+        onPointerCancel={gestures.onPointerCancel}
+        onClick={gestures.onClick}
+        onDoubleClick={gestures.onDoubleClick}
+        onMouseEnter={() => { onHoverNode(key) }}
+        onMouseLeave={() => { onHoverNode(null) }}
+      >
+        <span
+          className={clsx(styles.dot, node.displayStatus === 'running' ? styles.dotPulse : null)}
+          style={{ background: `var(${clusterColor})` }}
+        />
+        <span className={styles.body}>
+          <span className={styles.title}>
+            {node.blank ? t('node.newSession') : node.title}
+          </span>
+          <span className={styles.nodeMeta}>
+            <span className={styles.time}>{timeLabel(node.updatedAt, now, t)}</span>
+            {badge !== ''
+              ? (
+                <span
+                  className={styles.badge}
+                  onMouseEnter={() => { onHoverBadge(key) }}
+                  onMouseLeave={() => { onHoverBadge(null) }}
+                >
+                  {badge}
+                </span>
+              )
+              : null}
+          </span>
         </span>
-        {badge !== ''
-          ? (
-            <span
-              className={styles.badge}
-              onMouseEnter={() => { onHoverBadge(key) }}
-              onMouseLeave={() => { onHoverBadge(null) }}
-            >
-              {badge}
-            </span>
-          )
+      </button>
+      <span
+        className={clsx(styles.nodePort, dimClass)}
+        style={{ left: `${x + NODE_W / 2}px`, top: `${y}px` }}
+        data-session-port="input"
+        data-port-id={`${key}:input`}
+        aria-hidden="true"
+      />
+      <span
+        className={clsx(styles.nodePort, dimClass)}
+        style={{ left: `${x + NODE_W / 2}px`, top: `${y + CARD_H}px` }}
+        data-session-port="output"
+        data-port-id={`${key}:output`}
+        aria-hidden="true"
+      />
+    </>
+  )
+}
+
+/** The Selected Session summary and its explicit navigation/Branch actions. */
+function SelectedSessionPanel({ node, branchedFrom, now, t, onOpen, onBranch, onClose }: {
+  node: GraphNode | undefined
+  branchedFrom: string | undefined
+  now: number
+  t: Translate
+  onOpen: GraphViewInjected['openSession']
+  onBranch: GraphViewInjected['branchSession']
+  onClose: () => void
+}): ReactElement | null {
+  const [branchErrorFor, setBranchErrorFor] = useState<SessionId | null>(null)
+  if (node === undefined) return null
+  const status = displayStatusLabel(node.displayStatus, t)
+  return (
+    <div
+      className={styles.panel}
+      role="complementary"
+      aria-label={t('panel.title')}
+      data-testid="session-graph-panel"
+    >
+      <div className={styles.panelHeader}>
+        <div className={styles.panelHeading}>{t('panel.title')}</div>
+        <button
+          type="button"
+          className={styles.panelClose}
+          aria-label={t('panel.close')}
+          onClick={onClose}
+        >
+          ×
+        </button>
+      </div>
+      <div className={styles.panelTitle}>{node.blank ? t('node.newSession') : node.title}</div>
+      <div className={styles.panelMeta}>
+        <span>{timeLabel(node.updatedAt, now, t)}</span>
+        {status === ''
+          ? null
+          : <span className={styles.panelStatus} data-display-status={node.displayStatus}>{status}</span>}
+        {node.subagentCount > 0
+          ? <span>{t('panel.subagents', { count: node.subagentCount })}</span>
           : null}
-      </span>
-    </button>
+      </div>
+      {branchedFrom === undefined
+        ? null
+        : <div className={styles.panelRelation}>{t('node.branchedFrom', { name: branchedFrom })}</div>}
+      <div className={styles.panelActions}>
+        <button
+          type="button"
+          className={styles.panelPrimaryAction}
+          onClick={() => { onOpen(node.id) }}
+        >
+          {t('panel.open')}
+        </button>
+        <button
+          type="button"
+          className={styles.panelSecondaryAction}
+          onClick={() => {
+            void onBranch(node.id)
+              .then(() => {
+                setBranchErrorFor(failedId => failedId === node.id ? null : failedId)
+              })
+              .catch(() => { setBranchErrorFor(node.id) })
+          }}
+        >
+          {t('panel.branch')}
+        </button>
+      </div>
+      {branchErrorFor === node.id
+        ? <div className={styles.panelError} role="alert">{t('panel.branchError')}</div>
+        : null}
+    </div>
   )
 }
 
@@ -265,18 +375,18 @@ const CARD_H_MAP = 4
 /**
  * Render the free-viewport canvas over the laid-out graph.
  * @param laid - the auto-laid-out graph.
- * @param scopeKey - the workspace scope key for position persistence.
+ * @param arrangement - the graph scope identity for Session Arrangement persistence.
  * @param now - current epoch ms for relative-time labels.
  * @param t - the namespace translate seat.
  * @param onOpen - open one session node (navigation verb).
  * @returns the canvas element.
  */
 export function GraphCanvas({
-  laid, clusters, scopeKey, now, t, onOpen, onBranch,
+  laid, clusters, arrangement, now, t, onOpen, onBranch,
 }: {
   laid: LaidOutGraph
   clusters: readonly ClusterInfo[]
-  scopeKey: string
+  arrangement: SessionArrangementIdentity
   now: number
   t: Translate
   onOpen: GraphViewInjected['openSession']
@@ -284,18 +394,36 @@ export function GraphCanvas({
 }): ReactElement {
   const surfaceRef = useRef<HTMLDivElement | null>(null)
   const [viewport, setViewport] = useState(initialViewport)
-  // Read per render: every pan/zoom re-renders, keeping the viewport rect in
-  // step with the surface (a mid-gesture window resize lags one frame).
-  const surfaceRect = surfaceRef.current?.getBoundingClientRect()
-  const viewSize = {
-    width: surfaceRect?.width ?? 0,
-    height: surfaceRect?.height ?? 0,
-  }
+  const [viewSize, setViewSize] = useState({ width: 0, height: 0 })
+  const viewSizeRef = useRef(viewSize)
+  useEffect(() => {
+    const surface = surfaceRef.current
+    if (surface === null) return
+    const measure = (): void => {
+      const rect = surface.getBoundingClientRect()
+      const next = { width: rect.width, height: rect.height }
+      const previous = viewSizeRef.current
+      if (next.width === previous.width && next.height === previous.height) return
+      viewSizeRef.current = next
+      setViewSize(next)
+      if (previous.width > 0 && previous.height > 0) {
+        setViewport(current => resizeViewport(current, previous, next))
+      }
+    }
+    measure()
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(measure)
+      observer.observe(surface)
+      return () => { observer.disconnect() }
+    }
+    window.addEventListener('resize', measure)
+    return () => { window.removeEventListener('resize', measure) }
+  }, [])
   const dragRef = useRef<{ pointerId: number; lastX: number; lastY: number } | null>(null)
   const [positions, setPositions] = useState<Record<string, NodePosition>>({})
   const [collapsed, setCollapsed] = useState<readonly string[]>([])
   const [offsets, setOffsets] = useState<Record<string, ClusterOffset>>({})
-  const [restoredScope, setRestoredScope] = useState<string | null>(null)
+  const [restoredArrangementKey, setRestoredArrangementKey] = useState<string | null>(null)
   const positionsRef = useRef(positions)
   positionsRef.current = positions
   const collapsedRef = useRef(collapsed)
@@ -348,6 +476,10 @@ export function GraphCanvas({
   /** Node hover enter: emphasize the lineage now, arm the detail card. */
   const nodeEnter = (key: string): void => {
     setHoverNode(key)
+    if (selected === key) {
+      hidePreview()
+      return
+    }
     if (previewTimer.current !== null) window.clearTimeout(previewTimer.current)
     previewTimer.current = window.setTimeout(() => { setPreviewKey(key) }, PREVIEW_DELAY)
   }
@@ -376,15 +508,15 @@ export function GraphCanvas({
     animationTimer.current = window.setTimeout(() => { setAnimating(false) }, 280)
   }
 
-  // Restore the workspace's manual layout on scope entry; a corrupt or
-  // absent record leaves the auto layout in place.
+  // Restore the Session Arrangement on scope entry; a corrupt or absent
+  // record leaves the automatic arrangement in place.
   useEffect(() => {
-    const stored = loadLayout(scopeKey)
+    const stored = loadArrangement(arrangement)
     setPositions(stored?.positions ?? {})
     setCollapsed(stored?.collapsed ?? [])
     setOffsets(stored?.offsets ?? {})
-    setRestoredScope(scopeKey)
-  }, [scopeKey])
+    setRestoredArrangementKey(arrangement.key)
+  }, [arrangement.key, arrangement.legacyKey])
 
   const collapsedSet = useMemo(() => new Set(collapsed), [collapsed])
   // Fit once on scope entry so the whole graph is visible (manual layouts
@@ -392,7 +524,7 @@ export function GraphCanvas({
   const fittedRef = useRef(false)
   useEffect(() => {
     fittedRef.current = false
-  }, [scopeKey])
+  }, [arrangement.key])
 
   // Arrow-key navigation: move focus to the geometrically nearest node in
   // the pressed direction, following the layout as it stands.
@@ -400,7 +532,7 @@ export function GraphCanvas({
     const active = document.activeElement?.closest('[data-node-id]') as HTMLElement | null
     const from = active !== null
       ? shown.nodes.find(entry => entry.key === active.dataset.nodeId)
-      : shown.nodes.find(entry => entry.node.current) ?? shown.nodes[0]
+      : shown.nodes.find(entry => entry.node.viewed) ?? shown.nodes[0]
     if (from === undefined) return
     let best: { key: string; distance: number } | undefined
     for (const entry of shown.nodes) {
@@ -432,7 +564,7 @@ export function GraphCanvas({
     return contentBounds(laid, automaticFrames)
   }, [laid, clusters])
   useEffect(() => {
-    if (restoredScope !== scopeKey || fittedRef.current) return
+    if (restoredArrangementKey !== arrangement.key || fittedRef.current) return
     // The conversation shell measures its composer after the first paint.
     // Read the resulting graph surface on the following settled frame.
     let settledFrame: number | undefined
@@ -450,17 +582,17 @@ export function GraphCanvas({
     }
   // bounds must not retrigger the one-shot fit after the scope changed (the
   // fittedRef guard above owns that).
-  }, [bounds, scopeKey, restoredScope])
+  }, [arrangement.key, bounds, restoredArrangementKey])
   // One palette slot per cluster, by cluster order — the single source for
   // node dots and frame accents alike.
   const colorOfCluster = useMemo(() => {
     const map = new Map<string, string>()
     clusters.forEach((cluster, index) => {
-      map.set(cluster.rootId, CLUSTER_COLORS[index % CLUSTER_COLORS.length] ?? '--dsw-alias-border-l')
+      map.set(cluster.rootId, CLUSTER_COLORS[index % CLUSTER_COLORS.length] ?? '--dsw-alias-border-l2')
     })
     return map
   }, [clusters])
-  // The incoming fork edge names each member's branch source.
+  // The incoming Branch edge names each member's Branch source.
   const branchSource = useMemo(() => {
     const titleOf = new Map(shown.nodes.map(entry => [entry.key, entry.node.title]))
     const map = new Map<string, string>()
@@ -477,24 +609,32 @@ export function GraphCanvas({
     [shown, query],
   )
 
-  // Neighborhood emphasis: an active filter wins; otherwise hovering an
-  // edge emphasizes its endpoints and hovering a node its branch lineage.
-  const emphasis = useMemo((): ReadonlySet<string> | null => {
-    if (filterMatches !== null) return filterMatches
+  // Branch Lineage emphasis: an active filter wins, followed by transient
+  // edge/node hover. Selection remains as the stable fallback when the
+  // pointer leaves so the inspector and canvas tell the same story.
+  const emphasis = useMemo((): {
+    keys: ReadonlySet<string>
+    mode: 'filter' | 'context'
+  } | null => {
+    if (filterMatches !== null) return { keys: filterMatches, mode: 'filter' }
     if (hoverEdge !== null) {
       const found = shown.edges.find(entry => entry.edge.id === hoverEdge)
-      return found === undefined ? null : new Set([found.edge.from, found.edge.to])
+      return found === undefined
+        ? null
+        : { keys: new Set([found.edge.from, found.edge.to]), mode: 'context' }
     }
-    if (hoverNode === null) return null
-    const set = neighborhood(shown.nodes.map(entry => entry.node), hoverNode)
-    return set.size === 0 ? null : set
-  }, [filterMatches, hoverEdge, hoverNode, shown])
-  const dimmed = (key: string): boolean => emphasis !== null && !emphasis.has(key)
+    const focusKey = hoverNode ?? selected
+    if (focusKey === null) return null
+    const set = branchLineage(shown.nodes.map(entry => entry.node), focusKey)
+    return set.size === 0 ? null : { keys: set, mode: 'context' }
+  }, [filterMatches, hoverEdge, hoverNode, selected, shown])
+  const dimStyle = emphasis?.mode === 'filter' ? styles.dimFilter : styles.dimContext
+  const dimmed = (key: string): boolean => emphasis !== null && !emphasis.keys.has(key)
   const edgeDimmed = (from: string, to: string): boolean =>
-    emphasis !== null && !(emphasis.has(from) && emphasis.has(to))
+    emphasis !== null && !(emphasis.keys.has(from) && emphasis.keys.has(to))
   const frameDimmed = (clusterId: string): boolean =>
     emphasis !== null
-    && !shown.nodes.some(entry => entry.node.clusterId === clusterId && emphasis.has(entry.key))
+    && !shown.nodes.some(entry => entry.node.clusterId === clusterId && emphasis.keys.has(entry.key))
 
   /** Persist one layout revision, pruned to the live node and cluster ids. */
   const persist = (
@@ -504,7 +644,7 @@ export function GraphCanvas({
   ): void => {
     const knownNodes = new Set(shown.nodes.map(node => node.key))
     const knownClusters = new Set<string>(clusters.map(cluster => cluster.rootId))
-    saveLayout(scopeKey, {
+    saveLayout(arrangement.key, {
       positions: Object.fromEntries(
         Object.entries(nextPositions).filter(([key]) => knownNodes.has(key)),
       ),
@@ -598,6 +738,7 @@ export function GraphCanvas({
         suppressClickRef.current = false
         return
       }
+      hidePreview()
       setSelected(id)
     },
     onDoubleClick: () => {
@@ -630,6 +771,8 @@ export function GraphCanvas({
     // keys keep working. The guard must name every draggable: whoever does
     // not match gets its pointer capture stolen by the surface.
     if ((event.target as HTMLElement).closest('[data-node-id], [data-cluster-title], input, button, select, textarea, svg') !== null) return
+    hidePreview()
+    setSelected(null)
     dragRef.current = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY }
     event.currentTarget.focus()
     if (typeof event.currentTarget.setPointerCapture === 'function') {
@@ -681,7 +824,7 @@ export function GraphCanvas({
     setPositions({})
     setCollapsed([])
     setOffsets({})
-    saveLayout(scopeKey, { positions: {}, collapsed: [], offsets: {} })
+    saveLayout(arrangement.key, { positions: {}, collapsed: [], offsets: {} })
     fitBounds(automaticBounds)
   }
 
@@ -708,6 +851,21 @@ export function GraphCanvas({
   const selectedNode = selected !== null
     ? shown.nodes.find(entry => entry.node.id === selected)?.node
     : undefined
+
+  // The map earns its space only when some graph content is outside the
+  // visible surface. Keep it during the unmeasured first paint, then let
+  // fit/recenter/gesture renders decide from the live viewport geometry.
+  const screenBounds = {
+    left: viewport.panX + bounds.x * viewport.scale,
+    top: viewport.panY + bounds.y * viewport.scale,
+    right: viewport.panX + (bounds.x + bounds.width) * viewport.scale,
+    bottom: viewport.panY + (bounds.y + bounds.height) * viewport.scale,
+  }
+  const showMinimap = viewSize.width <= 0 || viewSize.height <= 0
+    || screenBounds.left < -1
+    || screenBounds.top < -1
+    || screenBounds.right > viewSize.width + 1
+    || screenBounds.bottom > viewSize.height + 1
 
   const toggleCluster = (rootId: string): void => {
     const next = collapsedSet.has(rootId)
@@ -793,7 +951,7 @@ export function GraphCanvas({
       aria-label={t('canvas.description')}
       tabIndex={-1}
       style={{
-        backgroundImage: 'radial-gradient(var(--dsw-alias-border-l) 1px, transparent 1px)',
+        backgroundImage: 'radial-gradient(var(--dsw-alias-border-l2) 1px, transparent 1px)',
         backgroundSize: `${GRID * viewport.scale}px ${GRID * viewport.scale}px`,
         backgroundPosition: `${viewport.panX}px ${viewport.panY}px`,
       }}
@@ -804,6 +962,11 @@ export function GraphCanvas({
       onKeyDown={(event) => {
         // Text fields own their keys (typing, caret moves, Escape).
         if ((event.target as HTMLElement).closest('input, textarea, select') !== null) return
+        if (event.key === 'Escape') {
+          hidePreview()
+          setSelected(null)
+          return
+        }
         const direction = event.key === 'ArrowLeft' ? 'left'
           : event.key === 'ArrowRight' ? 'right'
             : event.key === 'ArrowUp' ? 'up'
@@ -853,7 +1016,7 @@ export function GraphCanvas({
             key={frame.clusterId}
             className={clsx(
               styles.frame,
-              frameDimmed(frame.clusterId) ? styles.dim : null,
+              frameDimmed(frame.clusterId) ? dimStyle : null,
               raisedCluster === frame.clusterId ? styles.frameRaised : null,
             )}
             data-cluster-id={frame.clusterId}
@@ -903,7 +1066,7 @@ export function GraphCanvas({
                 key={edge.id}
                 className={clsx(
                   styles.edgeGroup,
-                  edgeDimmed(edge.from, edge.to) ? styles.dim : null,
+                  edgeDimmed(edge.from, edge.to) ? dimStyle : null,
                   hoverEdge === edge.id ? styles.edgeHot : null,
                 )}
               >
@@ -914,9 +1077,13 @@ export function GraphCanvas({
                   onMouseEnter={() => { setHoverEdge(edge.id) }}
                   onMouseLeave={() => { setHoverEdge(null) }}
                 />
-                <path className={styles.edgeFork} strokeDasharray="8 5" d={path} />
                 <path
-                  className={styles.edgeForkArrow}
+                  className={styles.edgeBranch}
+                  data-edge-kind="branch"
+                  d={path}
+                />
+                <path
+                  className={styles.edgeBranchArrow}
                   d={`M ${cx - 6} ${to.y - 9} L ${cx} ${to.y} L ${cx + 6} ${to.y - 9} Z`}
                 />
               </g>
@@ -929,6 +1096,8 @@ export function GraphCanvas({
             return (
               <line
                 className={styles.edgeDerivation}
+                data-edge-kind="subagent-derivation"
+                strokeDasharray="6 4"
                 x1={cx} y1={hovered.y + CARD_H}
                 x2={cx} y2={hovered.y + CARD_H + 24}
               />
@@ -963,13 +1132,13 @@ export function GraphCanvas({
             selected={selected === laidNode.node.id}
             onHoverBadge={setBadgeHover}
             badgeHovered={badgeHover === laidNode.key}
-            dimmed={dimmed(laidNode.key)}
+            dimClass={dimmed(laidNode.key) ? dimStyle : null}
             onHoverNode={(key) => {
               if (key === null) nodeLeave()
               else nodeEnter(key)
             }}
             clusterColor={colorOfCluster.get(laidNode.node.clusterId)
-              ?? (laidNode.node.clusterId === laidNode.node.id ? '--dsw-alias-label-dimmed' : '--dsw-alias-border-l')}
+              ?? (laidNode.node.clusterId === laidNode.node.id ? '--dsw-alias-label-dimmed' : '--dsw-alias-border-l2')}
           />
         ))}
       </div>
@@ -1015,72 +1184,78 @@ export function GraphCanvas({
           )
           : null}
       </div>
-      <div className={styles.controls} role="group" aria-label={t('canvas.description')}>
+      <div className={styles.controls} role="group" aria-label={t('toolbar.label')}>
         <button type="button" aria-label={t('toolbar.zoomOut')} onClick={() => { zoomFromCenter(1 / CONTROL_STEP) }}>−</button>
         <button type="button" aria-label={t('toolbar.zoomLevel')} onClick={zoomToIdentity}>
           {`${Math.round(viewport.scale * 100)}%`}
         </button>
         <button type="button" aria-label={t('toolbar.zoomIn')} onClick={() => { zoomFromCenter(CONTROL_STEP) }}>+</button>
+        <span className={styles.controlDivider} aria-hidden="true" />
         <button type="button" aria-label={t('toolbar.fit')} onClick={fit}>{t('toolbar.fit')}</button>
         <button type="button" aria-label={t('toolbar.relayout')} onClick={relayout}>{t('toolbar.relayout')}</button>
         <button type="button" aria-label={t('toolbar.reset')} onClick={reset}>{t('toolbar.reset')}</button>
+        <span className={styles.controlDivider} aria-hidden="true" />
         <button
           type="button"
           aria-label={t('toolbar.locate')}
           onClick={() => {
-            const current = shown.nodes.find(entry => entry.node.current)
-            if (current !== undefined) locateNode(current.key)
+            const viewed = shown.nodes.find(entry => entry.node.viewed)
+            if (viewed !== undefined) locateNode(viewed.key)
           }}
         >
           {t('toolbar.locate')}
         </button>
       </div>
-      {selectedNode !== undefined
+      <SelectedSessionPanel
+        node={selectedNode}
+        branchedFrom={selected === null ? undefined : branchSource.get(selected)}
+        now={now}
+        t={t}
+        onOpen={onOpen}
+        onBranch={onBranch}
+        onClose={() => { setSelected(null) }}
+      />
+      {showMinimap
         ? (
-          <div className={styles.panel} role="complementary" data-testid="session-graph-panel">
-            <div className={styles.panelTitle}>{selectedNode.blank ? t('node.newSession') : selectedNode.title}</div>
-            <div className={styles.panelMeta}>
-              {timeLabel(selectedNode.updatedAt, now, t)}
-              {selectedNode.subagentCount > 0
-                ? ` · ${t('panel.subagents', { count: selectedNode.subagentCount })}`
-                : ''}
-            </div>
-            <div className={styles.panelActions}>
-              <button type="button" onClick={() => { onOpen(selectedNode.id) }}>{t('panel.open')}</button>
-              <button type="button" onClick={() => { onBranch(selectedNode.id) }}>{t('panel.branch')}</button>
-            </div>
-          </div>
+          <Minimap
+            shown={shown}
+            frames={frames}
+            bounds={bounds}
+            viewport={viewport}
+            viewSize={viewSize}
+            onRecenter={recenter}
+            t={t}
+          />
         )
         : null}
-      <Minimap
-        shown={shown}
-        frames={frames}
-        bounds={bounds}
-        viewport={viewport}
-        viewSize={viewSize}
-        onRecenter={recenter}
-        t={t}
-      />
       {(() => {
-        // The hover detail card lives in screen space, glued to its node's
-        // right edge (flipping left when that would overflow the surface).
+        // The hover detail card lives in screen space and chooses a free side
+        // around its node while respecting canvas chrome and the inspector.
         if (previewKey === null) return null
         const entry = shown.nodes.find(item => item.key === previewKey)
         if (entry === undefined) return null
-        let px = viewport.panX + (entry.x + NODE_W) * viewport.scale + 8
-        const py = viewport.panY + entry.y * viewport.scale
-        if (viewSize.width > 0 && px + PREVIEW_W > viewSize.width) {
-          px = viewport.panX + entry.x * viewport.scale - PREVIEW_W - 8
-        }
-        const status = entry.node.running ? t('preview.status.running')
-          : entry.node.pending ? t('preview.status.pending')
-            : entry.node.completed ? t('preview.status.completed') : ''
+        const placement = placePreview({
+          anchor: {
+            x: viewport.panX + entry.x * viewport.scale,
+            y: viewport.panY + entry.y * viewport.scale,
+            width: NODE_W * viewport.scale,
+            height: CARD_H * viewport.scale,
+          },
+          preview: { width: PREVIEW_W, height: PREVIEW_H },
+          surface: viewSize,
+          insets: {
+            top: PREVIEW_TOP_INSET,
+            right: selectedNode === undefined ? 12 : INSPECTOR_RIGHT_INSET,
+          },
+        })
+        const status = displayStatusLabel(entry.node.displayStatus, t)
         const branched = branchSource.get(entry.key)
         return (
           <div
             className={styles.preview}
-            style={{ left: `${px}px`, top: `${py}px` }}
+            style={{ left: `${placement.x}px`, top: `${placement.y}px` }}
             data-testid="session-graph-preview"
+            data-placement={placement.side}
             aria-hidden="true"
           >
             <div className={styles.previewTitle}>
@@ -1096,7 +1271,6 @@ export function GraphCanvas({
             {branched !== undefined
               ? <div className={styles.previewMeta}>{t('node.branchedFrom', { name: branched })}</div>
               : null}
-            <div className={styles.previewHint}>{t('preview.hint')}</div>
           </div>
         )
       })()}

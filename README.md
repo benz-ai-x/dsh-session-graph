@@ -7,7 +7,7 @@ kind: "package-bundle"
 
 English | [中文](README.zh.md)
 
-This package adds a **Graph** tab to the DeepSeek Harness conversation view. It groups each ordinary-session derivation tree into a movable, collapsible cluster, draws fork relations as directed edges, and folds subagent descendants into status badges. The browser stores manual node positions, cluster offsets, and collapse state per workspace; the plugin does not change session logs or model requests.
+This package adds a **Graph** tab to the DeepSeek Harness conversation view. It groups Branch-connected Canvas Sessions into movable, collapsible Session Clusters, draws Branch relations as directed edges, and folds Subagent Sessions into Subagent Summaries. The browser stores each Session Arrangement by graph scope; the projection does not change session logs or model requests, while **New branch** delegates session creation to Harness.
 
 ## Install
 
@@ -39,14 +39,17 @@ The first release targets DeepSeek Harness `0.1.2-alpha.1`. The plugin intention
 
 ## Use the graph
 
-Open a non-blank session and choose **Graph** beside the standard conversation tabs. The view scopes itself to that session's workspace.
+Open a non-blank session and choose **Graph** beside the standard conversation tabs. The Viewed Session resolves a named Workspace Scope when possible and otherwise falls back to a Directory Scope.
 
-- A single click selects a node; the detail panel can open that session or create a branch.
+- A single click chooses the Selected Session and keeps its Branch Lineage emphasized; the closable detail inspector can open that session or create a Branch, and reports when Harness rejects the request. Click blank canvas space or press Escape to clear selection.
 - A double click opens the session in its last-used view.
+- Dwell on another Canvas Session for a compact preview without replacing the Selected Session inspector.
 - Drag nodes or complete cluster frames to arrange the canvas. Alignment guides snap nearby card edges.
-- Use wheel zoom, background-drag panning, fit, 100%, relayout, reset, current-session location, or the minimap.
+- Each Canvas Session exposes stable top input and bottom output terminals for later graph-editing features; Branches are solid directed edges and Subagent Derivations are dashed.
+- Use wheel zoom, background-drag panning, fit, 100%, relayout, reset, Viewed Session location, or the minimap. The minimap appears only when content leaves the visible surface, and resizing preserves the current content center and scale.
 - Filter by title; Enter centers the first match and Escape clears the filter.
-- Hover a node or edge to emphasize its related branch.
+- Hover a node or edge to emphasize its Branch Lineage.
+- Read the header badge to identify the package version and exact local Build ID; hover it for the full package identity.
 
 Keyboard shortcuts work while the canvas is focused: `+` and `-` zoom, `0` restores 100%, and `1` fits the graph.
 
@@ -59,7 +62,7 @@ pnpm install
 pnpm run check
 ```
 
-`pnpm run check` type-checks the standalone package, builds the host and browser entries, and runs 76 package-owned tests. To run the 51 full interaction tests against a prepared DeepSeek Harness checkout:
+`pnpm run check` type-checks the standalone package, builds the host and browser entries, and runs 85 package-owned tests. To run the 73 full interaction tests against a prepared DeepSeek Harness checkout:
 
 ```sh
 DSH_HARNESS_ROOT=/path/to/deepseek-harness pnpm test:harness
@@ -72,6 +75,8 @@ Build an installable archive with:
 ```sh
 pnpm pack
 ```
+
+Local builds derive a stable `local-<hash>` Build ID from `package.json`, `tsdown.config.ts`, and `src/`. Release automation can replace it by setting `DSH_SESSION_GRAPH_BUILD_ID` while building.
 
 ### Release
 
@@ -92,24 +97,23 @@ The package exports two host entries and one lazy browser module:
 
 ## Implementation
 
-`GraphView` reads the selected Session, workspace membership, session summaries, and pending-interaction map. Pure helpers derive clusters, fork edges, layout, snapping, filtering, and viewport state before `GraphCanvas` renders the result. The package provides no Host service and accepts no configuration fields.
+`GraphView` reads the Viewed Session, Workspace membership, session summaries, and pending-interaction map. Pure helpers derive Session Clusters, Branch edges, Subagent Summaries, layout, snapping, Title Filter matches, and viewport state before `GraphCanvas` renders the result. The package provides no Host service and accepts no configuration fields.
 
 | File | Responsibility |
 |---|---|
-| [`src/client/GraphView.tsx`](src/client/GraphView.tsx) | Workspace scope, graph derivation, and view header |
-| [`src/client/GraphCanvas.tsx`](src/client/GraphCanvas.tsx) | Canvas rendering, controls, gestures, hover state, and minimap |
-| [`src/client/graph-model.ts`](src/client/graph-model.ts) | Session scope, derivation edges, subagent badges, filtering, and neighborhoods |
+| [`src/client/GraphView.tsx`](src/client/GraphView.tsx) | Workspace/Directory Scope resolution, graph derivation, and view header |
+| [`src/client/GraphCanvas.tsx`](src/client/GraphCanvas.tsx) | Canvas rendering, ports, inspector, controls, gestures, hover state, and minimap |
+| [`src/client/graph-model.ts`](src/client/graph-model.ts) | Graph Scope resolution, Branch edges, Subagent Summaries, Title Filter matches, and Branch Lineages |
 | [`src/client/layout.ts`](src/client/layout.ts) and [`src/client/clusters.ts`](src/client/clusters.ts) | Tree coordinates, frames, collapse, offsets, and edge paths |
-| [`src/client/viewport.ts`](src/client/viewport.ts) and [`src/client/snap.ts`](src/client/snap.ts) | Zoom, pan, fit, minimap projection, and alignment guides |
-| [`src/client/layout-store.ts`](src/client/layout-store.ts) | Per-workspace browser persistence and invalid-record recovery |
+| [`src/client/viewport.ts`](src/client/viewport.ts), [`src/client/preview-placement.ts`](src/client/preview-placement.ts), and [`src/client/snap.ts`](src/client/snap.ts) | Zoom, pan, resize preservation, fit, minimap/preview placement, and alignment guides |
+| [`src/client/layout-store.ts`](src/client/layout-store.ts) | Per-scope Session Arrangement persistence, migration, and invalid-record recovery |
 
 ## Current limitations
 
 - Graph is unavailable on the no-session home screen and in a fresh blank session because neither has a conversation view ring.
-- The graph follows one workspace at a time and does not search message content or workspace paths.
+- The graph follows one Workspace or Directory Scope at a time and does not search message content or working-directory paths.
 - Pan and zoom reset on tab switch or reload; node positions, cluster offsets, and collapse state persist.
-- A fork created inside a subagent has no ordinary-session parent edge and appears as a root.
-- A rejected branch operation has no in-view error message.
+- A Branch created from a Subagent Session has no Canvas Session parent edge and appears as a Root Session.
 - Touch uses pointer-event fallbacks and has no dedicated controls.
 
 ## License

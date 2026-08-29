@@ -71,6 +71,32 @@ export function panBy(viewport: Viewport, dx: number, dy: number): Viewport {
   return { scale: viewport.scale, panX: viewport.panX + dx, panY: viewport.panY + dy }
 }
 
+/** One measured viewport surface extent in screen px. */
+export interface ViewportSize {
+  readonly width: number
+  readonly height: number
+}
+
+/**
+ * Preserve the content point at the viewport center while its surface changes
+ * size. Scale stays untouched; pan moves by half the screen-size delta.
+ * @param viewport - the current viewport.
+ * @param previous - the previous surface size.
+ * @param next - the next surface size.
+ * @returns the center-preserving viewport.
+ */
+export function resizeViewport(
+  viewport: Viewport,
+  previous: ViewportSize,
+  next: ViewportSize,
+): Viewport {
+  return {
+    scale: viewport.scale,
+    panX: viewport.panX + (next.width - previous.width) / 2,
+    panY: viewport.panY + (next.height - previous.height) / 2,
+  }
+}
+
 /**
  * Fit the content box into the view box with symmetric padding, centered.
  * The fit scale is clamped to the floor and to 100% (tiny content never

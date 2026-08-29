@@ -1,0 +1,3 @@
+# Key Session Arrangements by Scope Identity
+
+A Session Arrangement follows the graph scope it belongs to rather than only its directory string. Named Workspace Scopes use Workspace identity so distinct Workspaces that share a directory remain isolated, while Directory Scopes use their directory because they have no Workspace identity. On first access, a named Workspace copies a valid legacy path-keyed arrangement into its own identity so upgrades preserve user work; the legacy record remains recoverable.

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { deriveSessionGraph, resolveWorkspaceScope } from '../src/client/graph-model.ts'
+import { deriveSessionGraph, resolveGraphScope } from '../src/client/graph-model.ts'
 import { applyPositions, layoutSessionGraph } from '../src/client/layout.ts'
-import { loadLayout, saveLayout } from '../src/client/layout-store.ts'
+import { loadArrangement, loadLayout, saveLayout } from '../src/client/layout-store.ts'
 
 const id = (value: string): SessionId => value as SessionId
 
@@ -29,7 +29,7 @@ function laidFor(byId: Record<string, SessionSummary>) {
     jobsBySession: {},
     currentAddress: undefined,
   }
-  const scope = resolveWorkspaceScope(id(Object.keys(byId)[0] ?? ''), list, {
+  const scope = resolveGraphScope(id(Object.keys(byId)[0] ?? ''), list, {
     items: [], archivedSessionIds: [], state: 'idle', phase: 'ready', error: null,
   })
   return layoutSessionGraph(deriveSessionGraph(list, scope, undefined, new Map()))
@@ -57,10 +57,10 @@ describe('applyPositions', () => {
     const moved = applyPositions(laid, { child: { x: 0, y: 500 } })
     expect(moved.nodes.find(node => node.key === 'child')).toMatchObject({ x: 0, y: 500 })
     expect(moved.nodes.find(node => node.key === 'parent')).toMatchObject({ x: 0, y: 0 })
-    // The fork edge curves down to the moved child's top edge: the 456px
-    // vertical gap bends each control arm by half of it (228px).
-    expect(moved.edges[0]?.path).toBe('M 120 44 C 120 272, 120 272, 120 500')
-    expect(moved.height).toBeGreaterThanOrEqual(544)
+    // The Branch edge curves down to the moved child's top edge: the 444px
+    // vertical gap bends each control arm by half of it (222px).
+    expect(moved.edges[0]?.path).toBe('M 120 56 C 120 278, 120 278, 120 500')
+    expect(moved.height).toBeGreaterThanOrEqual(556)
   })
 
   it('tracks the complete bounds when a node moves left and up', () => {
@@ -69,7 +69,7 @@ describe('applyPositions', () => {
       child: session('child', { parentId: id('parent'), updatedAt: 200 }),
     })
     const moved = applyPositions(laid, { child: { x: -300, y: -200 } })
-    expect(moved).toMatchObject({ x: -300, y: -200, width: 540, height: 244 })
+    expect(moved).toMatchObject({ x: -300, y: -200, width: 540, height: 256 })
   })
 
   it('floors the curve bend on short vertical gaps', () => {
@@ -77,9 +77,9 @@ describe('applyPositions', () => {
       parent: session('parent', { updatedAt: 300 }),
       child: session('child', { parentId: id('parent'), updatedAt: 200 }),
     })
-    // A 16px gap bends by the 40px floor instead of the half-gap (8px).
+    // A 4px gap bends by the 40px floor instead of the half-gap (2px).
     const moved = applyPositions(laid, { child: { x: 300, y: 60 } })
-    expect(moved.edges[0]?.path).toBe('M 120 44 C 120 84, 420 20, 420 60')
+    expect(moved.edges[0]?.path).toBe('M 120 56 C 120 96, 420 20, 420 60')
   })
 
   it('keeps unknown ids out of the result', () => {
@@ -129,6 +129,20 @@ describe('layout persistence', () => {
       collapsed: [],
       offsets: {},
     })
+  })
+
+  it('copies a legacy path arrangement into a Workspace identity on first load', () => {
+    const storage = memoryStorage()
+    const legacy = {
+      positions: { a: { x: 10, y: 20 } },
+      collapsed: ['root'],
+      offsets: { root: { dx: 40, dy: -8 } },
+    }
+    saveLayout('/w', legacy, storage)
+
+    expect(loadArrangement({ key: 'workspace:w1', legacyKey: '/w' }, storage)).toEqual(legacy)
+    expect(loadLayout('workspace:w1', storage)).toEqual(legacy)
+    expect(loadLayout('/w', storage)).toEqual(legacy)
   })
 
   it('fails soft on corrupt payloads', () => {

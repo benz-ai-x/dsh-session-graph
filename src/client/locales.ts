@@ -6,8 +6,8 @@ export const NS = 'sessionGraph'
 /** The session-graph dictionary key set (the source of truth for both locales). */
 export type SessionGraphKey =
   | 'view.graph'
-  | 'workspace.count'
-  | 'workspace.untitled'
+  | 'scope.workspaceCount'
+  | 'scope.directoryCount'
   | 'node.newSession'
   | 'node.running'
   | 'node.subagents'
@@ -23,6 +23,7 @@ export type SessionGraphKey =
   | 'toolbar.zoomIn'
   | 'toolbar.zoomOut'
   | 'toolbar.zoomLevel'
+  | 'toolbar.label'
   | 'toolbar.fit'
   | 'toolbar.relayout'
   | 'toolbar.reset'
@@ -34,10 +35,12 @@ export type SessionGraphKey =
   | 'filter.none'
   | 'legend.derivation'
   | 'legend.branch'
+  | 'panel.title'
+  | 'panel.close'
   | 'panel.open'
   | 'panel.branch'
+  | 'panel.branchError'
   | 'panel.subagents'
-  | 'preview.hint'
   | 'preview.status.running'
   | 'preview.status.pending'
   | 'preview.status.completed'
@@ -55,8 +58,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh: Record<SessionGraphKey, string> = {
   'view.graph': '图谱',
-  'workspace.count': '{name} · {count} 个会话',
-  'workspace.untitled': '当前目录',
+  'scope.workspaceCount': '{name} · {count} 个会话',
+  'scope.directoryCount': '目录范围 · {count} 个会话',
   'node.newSession': '新会话',
   'node.running': '{count} 运行中',
   'node.subagents': '{count} 子代理',
@@ -72,34 +75,37 @@ export const zh: Record<SessionGraphKey, string> = {
   'toolbar.zoomIn': '放大',
   'toolbar.zoomOut': '缩小',
   'toolbar.zoomLevel': '缩放至 100%',
+  'toolbar.label': '画布工具',
   'toolbar.fit': '适应',
-  'toolbar.relayout': '布局',
-  'toolbar.reset': '重置',
+  'toolbar.relayout': '重新布局',
+  'toolbar.reset': '重置布局',
   'toolbar.locate': '定位',
   'canvas.minimap': '迷你地图',
   'filter.placeholder': '过滤会话标题',
   'filter.clear': '清除过滤',
   'filter.matches': '{count} 个匹配',
   'filter.none': '无匹配会话',
-  'legend.derivation': '派生',
+  'legend.derivation': '子代理派生',
   'legend.branch': '分支',
+  'panel.title': '会话详情',
+  'panel.close': '关闭会话详情',
   'panel.open': '打开会话',
   'panel.branch': '开新分支',
+  'panel.branchError': '无法创建分支，请重试',
   'panel.subagents': '{count} 子代理',
-  'preview.hint': '单击选择 · 双击打开',
   'preview.status.running': '运行中',
   'preview.status.pending': '等待输入',
   'preview.status.completed': '已完成',
   'canvas.description': '会话关系图谱',
-  'empty.outside': '当前会话不属于任何工作区',
-  'empty.none': '此工作区暂无会话',
+  'empty.outside': '无法确定当前查看会话的工作区或工作目录',
+  'empty.none': '此范围暂无画布会话',
 }
 
 /** English dictionary. */
 export const en: Record<SessionGraphKey, string> = {
   'view.graph': 'Graph',
-  'workspace.count': '{name} · {count} sessions',
-  'workspace.untitled': 'Current directory',
+  'scope.workspaceCount': '{name} · {count} sessions',
+  'scope.directoryCount': 'Directory scope · {count} sessions',
   'node.newSession': 'New session',
   'node.running': '{count} running',
   'node.subagents': '{count} subagents',
@@ -115,25 +121,28 @@ export const en: Record<SessionGraphKey, string> = {
   'toolbar.zoomIn': 'Zoom in',
   'toolbar.zoomOut': 'Zoom out',
   'toolbar.zoomLevel': 'Zoom to 100%',
+  'toolbar.label': 'Canvas tools',
   'toolbar.fit': 'Fit',
   'toolbar.relayout': 'Relayout',
-  'toolbar.reset': 'Reset',
+  'toolbar.reset': 'Reset layout',
   'toolbar.locate': 'Locate',
   'canvas.minimap': 'Minimap',
   'filter.placeholder': 'Filter session titles',
   'filter.clear': 'Clear filter',
   'filter.matches': 'Matches: {count}',
   'filter.none': 'No matching sessions',
-  'legend.derivation': 'Derivation',
+  'legend.derivation': 'Subagent derivation',
   'legend.branch': 'Branch',
+  'panel.title': 'Session details',
+  'panel.close': 'Close session details',
   'panel.open': 'Open session',
   'panel.branch': 'New branch',
+  'panel.branchError': "Couldn't create the branch. Try again",
   'panel.subagents': '{count} subagents',
-  'preview.hint': 'Click to select · double-click to open',
   'preview.status.running': 'Running',
   'preview.status.pending': 'Waiting for input',
   'preview.status.completed': 'Completed',
   'canvas.description': 'Session relationship graph',
-  'empty.outside': 'The current session belongs to no workspace',
-  'empty.none': 'No sessions in this workspace yet',
+  'empty.outside': 'The viewed session has no resolvable workspace or working directory',
+  'empty.none': 'No canvas sessions in this scope yet',
 }

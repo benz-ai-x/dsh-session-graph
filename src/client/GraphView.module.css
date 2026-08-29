@@ -19,7 +19,7 @@
   gap: 16px;
   flex: none;
   padding: 6px 16px;
-  border-bottom: 1px solid var(--dsw-alias-border-l);
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
 }
 
 .count {
@@ -36,34 +36,45 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-.legendLineDashed {
+.buildInfo {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+  cursor: help;
+}
+
+.legendLineDerivation {
   display: inline-block;
   width: 18px;
-  border-top: 1px solid var(--dsw-alias-label-tertiary);
+  border-top: 2px solid var(--dsw-alias-brand-primary);
   border-top-style: dashed;
 }
 
-/* A short solid line with a CSS triangle head: the derivation sample. */
-.legendLineArrow {
+/* A short solid line with a CSS triangle head: the Branch sample. */
+.legendLineBranch {
   display: inline-block;
   width: 18px;
   height: 1px;
-  background: var(--dsw-alias-brand-primary);
+  background: var(--dsw-alias-label-tertiary);
   position: relative;
 }
 
-.legendLineArrow::after {
+.legendLineBranch::after {
   content: '';
   position: absolute;
   right: -1px;
   top: -2.5px;
-  border-left: 5px solid var(--dsw-alias-brand-primary);
+  border-left: 5px solid var(--dsw-alias-label-tertiary);
   border-top: 3px solid transparent;
   border-bottom: 3px solid transparent;
 }
 
 .node:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: 2px;
 }
 
@@ -103,17 +114,20 @@
   right: 12px;
   display: flex;
   align-items: center;
-  gap: 4px;
+  z-index: 10;
+  gap: 2px;
   padding: 4px;
-  border-radius: 8px;
-  background: var(--dsw-alias-bg-base);
-  border: 1px solid var(--dsw-alias-border-l);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-3);
+  border: 1px solid var(--dsw-alias-border-l2);
+  box-shadow: var(--dsw-shadow-lv1);
 }
 
 .controls button {
   font-size: 12px;
-  min-width: 28px;
-  padding: 3px 8px;
+  min-width: 30px;
+  height: 28px;
+  padding: 0 8px;
   color: var(--dsw-alias-label-secondary);
   background: none;
   border: none;
@@ -123,12 +137,20 @@
 
 .controls button:hover {
   color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-overlay);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .controls button:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: 1px;
+}
+
+.controlDivider {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--dsw-alias-border-l2);
 }
 
 .filterBox {
@@ -137,16 +159,26 @@
   left: 12px;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 4px 3px 10px;
-  border-radius: 8px;
-  background: var(--dsw-alias-bg-base);
-  border: 1px solid var(--dsw-alias-border-l);
+  z-index: 10;
+  gap: 6px;
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 4px 6px 4px 12px;
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-3);
+  border: 1px solid var(--dsw-alias-border-l2);
+  box-shadow: var(--dsw-shadow-lv1);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.filterBox:focus-within {
+  border-color: var(--dsw-alias-state-business-primary);
+  box-shadow: 0 0 0 1px var(--dsw-alias-state-business-primary), var(--dsw-shadow-lv1);
 }
 
 .filterInput {
-  width: 150px;
-  font-size: 12px;
+  width: 180px;
+  font-size: 13px;
   color: var(--dsw-alias-label-primary);
   background: none;
   border: none;
@@ -178,21 +210,21 @@
 
 .filterBox button:hover {
   color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-overlay);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .filterBox button:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: 1px;
 }
 
 .frame {
   position: absolute;
   box-sizing: border-box;
-  border: 1px solid var(--dsw-alias-border-l);
-  border-radius: 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
   pointer-events: none;
-  background: var(--dsw-alias-bg-overlay);
+  background: var(--dsw-alias-bg-module-platform);
   transition: opacity 160ms ease;
   z-index: 0;
 }
@@ -208,9 +240,9 @@
   gap: 8px;
   height: 32px;
   padding: 0 12px 0 8px;
-  border-radius: 9px 9px 0 0;
-  border-bottom: 1px solid var(--dsw-alias-border-l);
-  background: var(--dsw-alias-bg-base);
+  border-radius: 11px 11px 0 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-3);
   color: var(--dsw-alias-label-secondary);
   pointer-events: auto;
   cursor: grab;
@@ -238,11 +270,11 @@
 }
 
 .frameToggle:hover {
-  background: var(--dsw-alias-bg-overlay);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .frameToggle:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: 1px;
 }
 
@@ -269,17 +301,19 @@
   right: 12px;
   bottom: 12px;
   box-sizing: border-box;
-  border: 1px solid var(--dsw-alias-border-l);
-  border-radius: 8px;
-  background: var(--dsw-alias-bg-base);
-  opacity: 0.92;
+  z-index: 8;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-3);
+  box-shadow: var(--dsw-shadow-lv1);
+  opacity: 0.96;
   touch-action: none;
   cursor: pointer;
 }
 
 .minimapFrame {
-  fill: var(--dsw-alias-bg-overlay);
-  stroke: var(--dsw-alias-border-l);
+  fill: var(--dsw-alias-bg-module-platform);
+  stroke: var(--dsw-alias-border-l2);
   stroke-width: 1;
 }
 
@@ -289,8 +323,8 @@
 
 .minimapView {
   fill: none;
-  stroke: var(--dsw-alias-label-tertiary);
-  stroke-width: 1;
+  stroke: var(--dsw-alias-state-business-primary);
+  stroke-width: 1.5;
 }
 
 .edges {
@@ -300,19 +334,19 @@
   z-index: 2;
 }
 
-.edgeFork {
+.edgeBranch {
   fill: none;
   stroke: var(--dsw-alias-label-tertiary);
   stroke-width: 1.5;
 }
 
-.edgeForkArrow {
+.edgeBranchArrow {
   stroke: var(--dsw-alias-label-tertiary);
   stroke-width: 1.5;
   fill: var(--dsw-alias-label-tertiary);
 }
 
-/* The invisible fat stroke that makes a thin dashed edge hoverable. */
+/* The invisible fat stroke that makes a thin Branch edge hoverable. */
 .edgeHit {
   fill: none;
   stroke: transparent;
@@ -324,18 +358,30 @@
   transition: opacity 160ms ease;
 }
 
-.edgeHot .edgeFork {
-  stroke: var(--dsw-alias-brand-primary);
+.edgeHot .edgeBranch {
+  stroke: var(--dsw-alias-state-business-primary);
   stroke-width: 2;
 }
 
-.edgeHot .edgeForkArrow {
-  stroke: var(--dsw-alias-brand-primary);
-  fill: var(--dsw-alias-brand-primary);
+.edgeHot .edgeBranchArrow {
+  stroke: var(--dsw-alias-state-business-primary);
+  fill: var(--dsw-alias-state-business-primary);
 }
 
-.dim {
-  opacity: 0.22;
+.dimContext {
+  opacity: 0.52;
+}
+
+.frame.dimContext {
+  opacity: 0.72;
+}
+
+.edgeGroup.dimContext {
+  opacity: 0.38;
+}
+
+.dimFilter {
+  opacity: 0.2;
 }
 
 .node {
@@ -345,26 +391,59 @@
   align-items: center;
   gap: 8px;
   width: 240px;
-  height: 44px;
+  height: 56px;
   box-sizing: border-box;
-  padding: 4px 10px;
+  padding: 7px 12px;
   text-align: left;
   font: inherit;
   color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-base);
-  border: 1px solid var(--dsw-alias-label-secondary);
-  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-3);
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 12px;
+  box-shadow: var(--dsw-shadow-lv1);
   cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease, opacity 160ms ease;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 160ms ease;
 }
 
 .node:hover {
-  border-color: var(--dsw-alias-brand-primary);
+  border-color: var(--dsw-alias-state-business-primary);
+  box-shadow: var(--dsw-shadow-lv2);
+}
+
+/* Stable connection seats for future graph editing. They are deliberately
+   non-interactive today: pointer gestures continue to belong to the card,
+   while data-session-port/data-port-id provide the later wiring contract. */
+.nodePort {
+  position: absolute;
+  z-index: 4;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 2px solid var(--dsw-alias-label-tertiary);
+  border-radius: 50%;
+  background: var(--dsw-alias-bg-layer-3);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.node:hover + .nodePort,
+.node:hover + .nodePort + .nodePort,
+.node[aria-current='true'] + .nodePort,
+.node[aria-current='true'] + .nodePort + .nodePort,
+.nodeSelected + .nodePort,
+.nodeSelected + .nodePort + .nodePort {
+  border-color: var(--dsw-alias-state-business-primary);
+  box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-3);
 }
 
 .node[aria-current='true'] {
-  border-color: var(--dsw-alias-brand-primary);
-  background: var(--dsw-alias-bg-overlay);
+  border-color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-state-business-tertiary);
 }
 
 .dot {
@@ -388,7 +467,7 @@
 
 .nodeSelected {
   /* React Flow discipline: the border stays neutral, selection is a ring. */
-  box-shadow: 0 0 0 2px var(--dsw-alias-brand-primary);
+  box-shadow: 0 0 0 2px var(--dsw-alias-state-business-primary), var(--dsw-shadow-lv2);
 }
 
 .nodePending {
@@ -396,8 +475,9 @@
 }
 
 .time {
-  font-size: 13px;
-  color: var(--dsw-alias-label-primary);
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -412,12 +492,12 @@
 }
 
 .badgeHovered {
-  border-color: var(--dsw-alias-brand-primary);
+  border-color: var(--dsw-alias-state-business-primary);
   border-style: solid;
 }
 
 .edgeDerivation {
-  stroke: var(--dsw-alias-brand-primary);
+  stroke: var(--dsw-alias-state-business-primary);
   stroke-width: 2;
   pointer-events: none;
 }
@@ -429,7 +509,7 @@
   top: 0;
   bottom: 0;
   width: 0;
-  border-left: 1px dashed var(--dsw-alias-brand-primary);
+  border-left: 1px dashed var(--dsw-alias-state-business-primary);
   pointer-events: none;
 }
 
@@ -439,87 +519,176 @@
   left: 0;
   right: 0;
   height: 0;
-  border-top: 1px dashed var(--dsw-alias-brand-primary);
+  border-top: 1px dashed var(--dsw-alias-state-business-primary);
   pointer-events: none;
 }
 
 .panel {
   position: absolute;
-  right: 12px;
+  z-index: 12;
+  right: 16px;
   top: 60px;
-  width: 220px;
+  width: 280px;
+  max-height: calc(100% - 76px);
+  overflow-y: auto;
   box-sizing: border-box;
-  padding: 12px;
-  border-radius: 10px;
-  background: var(--dsw-alias-bg-base);
-  border: 1px solid var(--dsw-alias-border-l);
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-3);
+  border: 1px solid var(--dsw-alias-border-l2);
+  box-shadow: var(--dsw-shadow-lv3);
   display: flex;
   flex-direction: column;
+  gap: 12px;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.panelTitle {
-  font-size: 13px;
+.panelHeading {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.panelClose {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  color: var(--dsw-alias-label-secondary);
+  background: none;
+  cursor: pointer;
+}
+
+.panelClose:hover {
   color: var(--dsw-alias-label-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.panelClose:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
+.panelTitle {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+  overflow-wrap: anywhere;
 }
 
 .panelMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
   font-size: 12px;
   color: var(--dsw-alias-label-secondary);
 }
 
+.panelStatus {
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-state-business-tertiary);
+}
+
+.panelRelation {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-module-platform);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  overflow-wrap: anywhere;
+}
+
+.panelError {
+  font-size: 12px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
 .panelActions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
 .panelActions button {
-  flex: 1;
   font-size: 12px;
+  min-height: 34px;
   padding: 6px 10px;
   border-radius: 8px;
-  border: 1px solid var(--dsw-alias-border-l);
-  background: var(--dsw-alias-bg-overlay);
+  border: 1px solid var(--dsw-alias-border-l2);
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
 }
 
-.panelActions button:hover {
-  border-color: var(--dsw-alias-brand-primary);
+.panelPrimaryAction {
+  border-color: var(--dsw-alias-button-info-fill);
+  color: var(--dsw-alias-label-primary-foreground);
+  background: var(--dsw-alias-button-info-fill);
+}
+
+.panelPrimaryAction:hover {
+  border-color: var(--dsw-alias-button-info-hover);
+  background: var(--dsw-alias-button-info-hover);
+}
+
+.panelSecondaryAction {
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.panelSecondaryAction:hover {
+  border-color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .panelActions button:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: 1px;
 }
 
 /* The hover detail card: screen-space, never swallows the pointer. */
 .preview {
   position: absolute;
+  z-index: 11;
   width: 240px;
   box-sizing: border-box;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--dsw-alias-bg-base);
-  border: 1px solid var(--dsw-alias-border-l);
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-3);
+  border: 1px solid var(--dsw-alias-border-l2);
+  box-shadow: var(--dsw-shadow-lv2);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   pointer-events: none;
 }
 
 .previewTitle {
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
   color: var(--dsw-alias-label-primary);
   overflow-wrap: anywhere;
 }
 
 .previewStatus {
+  align-self: flex-start;
+  padding: 1px 6px;
+  border-radius: 999px;
   font-size: 12px;
   color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-state-business-tertiary);
 }
 
 .previewMeta {
@@ -527,17 +696,20 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-.previewHint {
-  font-size: 11px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
 .body {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
+  flex: 1;
   min-width: 0;
   transition: opacity 160ms ease;
+}
+
+.nodeMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 /* Low-zoom level of detail: cards reduce to dot + chrome, text fades out. */
@@ -546,7 +718,8 @@
 }
 
 .title {
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -568,8 +741,69 @@
   text-align: center;
 }
 
+@media (max-width: 720px) {
+  .header {
+    gap: 10px;
+    padding-inline: 12px;
+    overflow-x: auto;
+  }
+
+  .count,
+  .legend,
+  .buildInfo {
+    flex: none;
+    white-space: nowrap;
+  }
+
+  .filterBox {
+    right: 12px;
+  }
+
+  .filterInput {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+
+  .controls {
+    top: 58px;
+    left: 12px;
+    right: 12px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .controls::-webkit-scrollbar {
+    display: none;
+  }
+
+  .controls button {
+    flex: none;
+    min-height: 32px;
+  }
+
+  .panel {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+    max-height: min(52%, 360px);
+  }
+
+  /* The bottom-sheet inspector owns the navigation corner on narrow views. */
+  .panel ~ .minimap {
+    display: none;
+  }
+
+  .preview {
+    max-width: calc(100% - 24px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .node,
+  .nodePort,
   .frame,
   .edgeGroup,
   .body {

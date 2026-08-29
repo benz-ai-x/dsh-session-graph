@@ -41,16 +41,13 @@ export function apply(ctx: Context): void {
     locale: NS,
     label: () => t('view.graph'),
     inject: (): GraphViewInjected => ({
-      // Canvas rows are ordinary sessions by construction (subagent-origin
-      // rows fold into badges), so navigation is a plain open.
+      // Canvas Sessions exclude Subagent Sessions by construction, so
+      // navigation is a plain open.
       openSession: (id: SessionId) => {
         ctx.sessions.open(id)
       },
-      branchSession: (id: SessionId) => {
-        void ctx.sessions.fork({ sessionId: id, increaseTitle: true }).catch(() => {
-          // The graph has no error surface. Keep the current selection when
-          // the Session Controller rejects the branch operation.
-        })
+      branchSession: async (id: SessionId) => {
+        await ctx.sessions.fork({ sessionId: id, increaseTitle: true })
       },
     }),
   }, GraphView))

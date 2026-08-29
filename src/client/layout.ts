@@ -11,7 +11,7 @@ import type { GraphEdge, GraphNode, SessionGraph } from './graph-model.ts'
 /** Node card width in px. */
 export const NODE_W = 240
 /** Node card height in px. */
-export const CARD_H = 44
+export const CARD_H = 56
 /** Horizontal distance between consecutive leaf columns in px. */
 export const COL_PITCH = 280
 /** Vertical distance between consecutive depth rows in px. */
@@ -19,7 +19,7 @@ export const DEPTH_PITCH = 120
 /** Vertical gap between stacked cluster frames in px. */
 export const CLUSTER_GAP = 72
 /** Vertical distance between rows of a collapsed cluster in content px. */
-export const COLLAPSED_ROW = 52
+export const COLLAPSED_ROW = 64
 
 /** One positioned node card. */
 export interface LaidOutNode {
@@ -87,7 +87,7 @@ export function edgePath(from: { x: number; y: number }, to: { x: number; y: num
 /**
  * Lay out the session graph.
  *
- * Each cluster's derivation tree is laid out in its own local frame (depth
+ * Each Session Cluster's Branch-connected Canvas Sessions are laid out in a local frame (depth
  * rows, leaves on allocated columns, parents centered on their first/last
  * child midpoint), then the cluster frames stack top to bottom in display
  * order. Each vertical allocation reserves the taller of its expanded tree
@@ -159,11 +159,11 @@ export function layoutSessionGraph(graph: SessionGraph): LaidOutGraph {
 }
 
 /**
- * Re-derive every edge path from the current node positions. An edge whose
+ * Re-derive every edge path from the supplied node positions. An edge whose
  * endpoint is not in the node set, or that the caller flags to keep, passes
  * through with its path untouched.
  * @param edges - the edges to redraw.
- * @param byKey - the current node positions keyed by node id.
+ * @param byKey - the supplied node positions keyed by node id.
  * @param keepPath - predicate marking edges to pass through untouched.
  * @returns the edges with redrawn paths.
  */

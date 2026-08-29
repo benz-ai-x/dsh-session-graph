@@ -1,6 +1,6 @@
 /**
  * Pure cluster-frame geometry, collapse layout, and whole-cluster offsets
- * over the laid-out graph: the frame box around each cluster's current node
+ * over the laid-out graph: the frame box around each cluster's laid-out node
  * positions, the compact column a collapsed cluster stacks into, the offset
  * a dragged cluster carries, and the palette cycle that colors frames by
  * cluster order.
@@ -39,7 +39,7 @@ export interface LaidOutFrame {
 }
 
 /**
- * Compute the frame boxes for the laid-out clusters from the current node
+ * Compute the frame boxes for the laid-out clusters from the supplied node
  * positions. Every cluster frames — isolated singletons included — so every
  * session sits inside a named, draggable group; a collapsed cluster frames
  * only its compact column, and a cluster whose root matches no laid-out
@@ -131,7 +131,7 @@ export function applyOffsets(
 
 /**
  * Re-lay the members of every collapsed cluster into one compact column at
- * that cluster's current node-bounds origin and drop its intra-cluster edges;
+ * that cluster's laid-out node-bounds origin and drop its intra-cluster edges;
  * uncollapsed clusters keep their positions. The input graph is returned
  * untouched when nothing is collapsed.
  * @param laid - the laid-out graph.

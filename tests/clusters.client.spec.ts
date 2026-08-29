@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { deriveSessionGraph, resolveWorkspaceScope } from '../src/client/graph-model.ts'
+import { deriveSessionGraph, resolveGraphScope } from '../src/client/graph-model.ts'
 import { layoutSessionGraph } from '../src/client/layout.ts'
 import {
   applyCollapse, applyOffsets, CLUSTER_COLORS, clusterFrames, contentBounds,
@@ -31,7 +31,7 @@ function graphFor(byId: Record<string, SessionSummary>) {
     jobsBySession: {},
     currentAddress: undefined,
   }
-  const scope = resolveWorkspaceScope(id(Object.keys(byId)[0] ?? ''), list, {
+  const scope = resolveGraphScope(id(Object.keys(byId)[0] ?? ''), list, {
     items: [], archivedSessionIds: [], state: 'idle', phase: 'ready', error: null,
   })
   const graph = deriveSessionGraph(list, scope, undefined, new Map())
@@ -45,7 +45,7 @@ describe('clusterFrames', () => {
       child: session('child', { parentId: id('root'), updatedAt: 400 }),
       lone: session('lone', { updatedAt: 300 }),
     })
-    // Both clusters frame — the derivation tree and the isolated singleton.
+    // Both Session Clusters frame — the Branch-connected sessions and the isolated singleton.
     const frames = clusterFrames(laid, clusters)
     expect(frames).toHaveLength(2)
     const frame = frames[0]!
@@ -55,7 +55,7 @@ describe('clusterFrames', () => {
     expect(frame.x).toBe(-16)
     expect(frame.y).toBe(-16 - 32)
     expect(frame.width).toBe(240 + 32)
-    expect(frame.height).toBe(164 + 32 + 32)
+    expect(frame.height).toBe(176 + 32 + 32)
     expect(frame.collapsed).toBe(false)
     expect(frames[1]?.clusterId).toBe('lone')
   })
@@ -123,7 +123,7 @@ describe('applyCollapse', () => {
       c: session('c', { parentId: id('root'), updatedAt: 200 }),
     })
     const collapsed = applyCollapse(laid, clusters, new Set(['root']))
-    expect(collapsed).toMatchObject({ x: 0, y: 0, width: 240, height: 200 })
+    expect(collapsed).toMatchObject({ x: 0, y: 0, width: 240, height: 248 })
   })
 
   it('stacks collapsed members into one compact column and leaves others in place', () => {
@@ -135,7 +135,7 @@ describe('applyCollapse', () => {
     // Both members share the cluster's previous compact-column x with stacked rows.
     expect(child.x).toBe(previousRoot.x)
     expect(root.x).toBe(previousRoot.x)
-    expect(child.y - root.y).toBe(52)
+    expect(child.y - root.y).toBe(64)
     const lone = collapsedGraph.nodes.find(node => node.key === 'lone')!
     expect(lone.x).toBe(laid.nodes.find(node => node.key === 'lone')!.x)
   })
@@ -172,10 +172,10 @@ describe('applyOffsets', () => {
     // The untouched cluster keeps its seat.
     const lone = moved.nodes.find(node => node.key === 'lone')!
     expect(lone).toMatchObject(laid.nodes.find(node => node.key === 'lone')!)
-    // The edge follows the shifted endpoints (76px vertical gap → 40px floor bend).
-    expect(moved.edges[0]?.path).toBe('M 170 74 C 170 114, 170 110, 170 150')
+    // The edge follows the shifted endpoints (64px vertical gap → 40px floor bend).
+    expect(moved.edges[0]?.path).toBe('M 170 86 C 170 126, 170 110, 170 150')
     expect(moved.width).toBeGreaterThanOrEqual(50 + 240)
-    expect(moved.height).toBeGreaterThanOrEqual(150 + 44)
+    expect(moved.height).toBeGreaterThanOrEqual(150 + 56)
   })
 
   it('tracks the complete bounds when a cluster moves left and up', () => {
@@ -184,7 +184,7 @@ describe('applyOffsets', () => {
       child: session('child', { parentId: id('root'), updatedAt: 400 }),
     })
     const moved = applyOffsets(laid, { root: { dx: -300, dy: -200 } })
-    expect(moved).toMatchObject({ x: -300, y: -200, width: 240, height: 164 })
+    expect(moved).toMatchObject({ x: -300, y: -200, width: 240, height: 176 })
   })
 
   it('returns the input graph on empty, zero, and unknown offsets', () => {
@@ -227,7 +227,7 @@ describe('contentBounds', () => {
       x: -316,
       y: -248,
       width: 272,
-      height: 228,
+      height: 240,
     })
   })
 })

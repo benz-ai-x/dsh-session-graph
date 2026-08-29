@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceSnapshot, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { deriveSessionGraph, matchFilter, neighborhood, resolveWorkspaceScope } from '../src/client/graph-model.ts'
+import { branchLineage, deriveSessionGraph, matchFilter, resolveGraphScope } from '../src/client/graph-model.ts'
 import type { GraphNode } from '../src/client/graph-model.ts'
 
 const id = (value: string): SessionId => value as SessionId
@@ -54,23 +54,27 @@ function workspacesState(items: WorkspaceView[], archived: string[] = []): Works
 
 function graphFor(
   byId: Record<string, SessionSummary>,
-  currentId?: SessionId,
+  viewedId?: SessionId,
 ) {
   const list = listState(byId)
-  const scope = resolveWorkspaceScope(
-    currentId ?? id(Object.keys(byId)[0] ?? ''), list, workspacesState([]),
+  const scope = resolveGraphScope(
+    viewedId ?? id(Object.keys(byId)[0] ?? ''), list, workspacesState([]),
   )
-  return deriveSessionGraph(list, scope, currentId, new Map())
+  return deriveSessionGraph(list, scope, viewedId, new Map())
 }
 
-describe('resolveWorkspaceScope', () => {
+describe('resolveGraphScope', () => {
   it('resolves by sessionIds membership first and unions same-cwd rows into members', () => {
     const list = listState({
       a: session('a'),
       b: session('b', { cwd: '/w' }),
       c: session('c', { cwd: '/other' }),
     })
-    const scope = resolveWorkspaceScope(id('a'), list, workspacesState([workspace('w1', '/w', ['a'])]))
+    const scope = resolveGraphScope(id('a'), list, workspacesState([workspace('w1', '/w', ['a'])]))
+    expect(scope).toMatchObject({
+      kind: 'workspace',
+      arrangement: { key: 'workspace:w1', legacyKey: '/w' },
+    })
     expect(scope?.label).toBe('Workspace w1')
     expect(scope?.path).toBe('/w')
     expect(scope?.members.has(id('a'))).toBe(true)
@@ -80,7 +84,7 @@ describe('resolveWorkspaceScope', () => {
 
   it('falls back to a path match on the viewed session cwd when unaccounted', () => {
     const list = listState({ a: session('a', { cwd: '/w' }) })
-    const scope = resolveWorkspaceScope(id('a'), list, workspacesState([workspace('w1', '/w', [])]))
+    const scope = resolveGraphScope(id('a'), list, workspacesState([workspace('w1', '/w', [])]))
     expect(scope?.label).toBe('Workspace w1')
     expect(scope?.members.has(id('a'))).toBe(true)
   })
@@ -91,8 +95,11 @@ describe('resolveWorkspaceScope', () => {
       b: session('b', { cwd: '/loose' }),
       c: session('c', { cwd: '/elsewhere' }),
     })
-    const scope = resolveWorkspaceScope(id('a'), list, workspacesState([]))
-    expect(scope?.label).toBeUndefined()
+    const scope = resolveGraphScope(id('a'), list, workspacesState([]))
+    expect(scope).toMatchObject({
+      kind: 'directory',
+      arrangement: { key: '/loose', legacyKey: undefined },
+    })
     expect(scope?.path).toBe('/loose')
     expect(scope?.members.has(id('a'))).toBe(true)
     expect(scope?.members.has(id('b'))).toBe(true)
@@ -103,12 +110,12 @@ describe('resolveWorkspaceScope', () => {
     const loose = { ...session('a') }
     delete (loose as Partial<SessionSummary>).cwd
     const list = listState({ a: loose })
-    expect(resolveWorkspaceScope(id('a'), list, workspacesState([]))).toBeUndefined()
+    expect(resolveGraphScope(id('a'), list, workspacesState([]))).toBeUndefined()
   })
 
   it('excludes archived sessions from members', () => {
     const list = listState({ a: session('a'), gone: session('gone') })
-    const scope = resolveWorkspaceScope(
+    const scope = resolveGraphScope(
       id('a'), list, workspacesState([workspace('w1', '/w', ['a', 'gone'])], ['gone']),
     )
     expect(scope?.members.has(id('gone'))).toBe(false)
@@ -116,19 +123,19 @@ describe('resolveWorkspaceScope', () => {
 })
 
 describe('deriveSessionGraph clusters', () => {
-  it('groups one derivation tree into a single cluster and isolates unattached sessions', () => {
+  it('groups Branch-connected Canvas Sessions into a Session Cluster and isolates unattached ones', () => {
     const graph = graphFor({
       root: session('root', { updatedAt: 500 }),
-      forkChild: session('forkChild', { parentId: id('root'), updatedAt: 400 }),
-      grandchild: session('grandchild', { parentId: id('forkChild'), updatedAt: 300 }),
+      branchChild: session('branchChild', { parentId: id('root'), updatedAt: 400 }),
+      grandchild: session('grandchild', { parentId: id('branchChild'), updatedAt: 300 }),
       lone: session('lone', { updatedAt: 200 }),
     })
     expect(graph.clusters.map(cluster => cluster.rootId)).toEqual(['root', 'lone'])
     expect(graph.clusters[0]).toMatchObject({
-      rootId: id('root'), label: 'Session root', memberIds: [id('root'), id('forkChild'), id('grandchild')],
+      rootId: id('root'), label: 'Session root', memberIds: [id('root'), id('branchChild'), id('grandchild')],
     })
     expect(graph.clusters[1]).toMatchObject({ rootId: id('lone'), memberIds: [id('lone')] })
-    expect(graph.nodes.get('forkChild')?.clusterId).toBe(id('root'))
+    expect(graph.nodes.get('branchChild')?.clusterId).toBe(id('root'))
     expect(graph.sessionCount).toBe(4)
   })
 
@@ -159,50 +166,50 @@ describe('deriveSessionGraph subagent folding', () => {
     expect(graph.clusters[0]?.memberIds).toEqual([id('root')])
   })
 
-  it('terminates badge propagation at an ordinary fork: a fork child owns its own subtree', () => {
+  it('terminates Subagent Summary propagation at a Branch boundary', () => {
     const graph = graphFor({
       root: session('root', { updatedAt: 500 }),
-      forkChild: session('forkChild', { parentId: id('root'), updatedAt: 400 }),
-      forkSub: session('forkSub', { parentId: id('forkChild'), origin: 'subagent' }),
+      branchChild: session('branchChild', { parentId: id('root'), updatedAt: 400 }),
+      branchSub: session('branchSub', { parentId: id('branchChild'), origin: 'subagent' }),
     })
     expect(graph.nodes.get('root')?.subagentCount).toBe(0)
-    expect(graph.nodes.get('forkChild')).toMatchObject({ subagentCount: 1, runningSubagents: 0 })
+    expect(graph.nodes.get('branchChild')).toMatchObject({ subagentCount: 1, runningSubagents: 0 })
   })
 })
 
 describe('deriveSessionGraph edges', () => {
-  it('keeps fork edges inside the cluster between attached rows', () => {
+  it('keeps Branch edges inside the Session Cluster between attached Canvas Sessions', () => {
     const graph = graphFor({
       root: session('root', { updatedAt: 500 }),
       child: session('child', { parentId: id('root'), updatedAt: 400 }),
     })
     expect(graph.children.get('root')).toEqual(['child'])
-    expect(graph.edges).toContainEqual({ id: 'fork:root->child', from: 'root', to: 'child' })
+    expect(graph.edges).toContainEqual({ id: 'branch:root->child', from: 'root', to: 'child' })
   })
 
-  it('renders a fork of a subagent as a new root in its own cluster without an edge', () => {
+  it('renders a Branch from a Subagent Session as a new Root Session without an edge', () => {
     const graph = graphFor({
       root: session('root', { updatedAt: 500 }),
       sub: session('sub', { parentId: id('root'), origin: 'subagent', updatedAt: 400 }),
-      forkOfSub: session('forkOfSub', { parentId: id('sub'), updatedAt: 300 }),
+      branchOfSub: session('branchOfSub', { parentId: id('sub'), updatedAt: 300 }),
     })
-    expect(graph.clusters.map(cluster => cluster.rootId)).toEqual(['root', 'forkOfSub'])
-    expect(graph.edges.some(edge => edge.to === 'forkOfSub')).toBe(false)
+    expect(graph.clusters.map(cluster => cluster.rootId)).toEqual(['root', 'branchOfSub'])
+    expect(graph.edges.some(edge => edge.to === 'branchOfSub')).toBe(false)
   })
 
-  it('excludes sessions outside the workspace scope', () => {
+  it('excludes sessions outside the graph scope', () => {
     const list = listState({
       inside: session('inside'),
       outside: session('outside', { cwd: '/elsewhere' }),
     })
-    const scope = resolveWorkspaceScope(id('inside'), list, workspacesState([workspace('w1', '/w', ['inside'])]))
+    const scope = resolveGraphScope(id('inside'), list, workspacesState([workspace('w1', '/w', ['inside'])]))
     const graph = deriveSessionGraph(list, scope, undefined, new Map())
     expect(graph.clusters.map(cluster => cluster.rootId)).toEqual(['inside'])
   })
 })
 
 describe('deriveSessionGraph visibility rules', () => {
-  it('excludes blank sessions except the current one', () => {
+  it('excludes blank sessions except the Viewed Session', () => {
     const graph = graphFor({
       real: session('real', { updatedAt: 100 }),
       blankOther: session('blankOther', { blank: true }),
@@ -211,39 +218,58 @@ describe('deriveSessionGraph visibility rules', () => {
     expect(graph.clusters.map(cluster => cluster.rootId)).toEqual(['blankMine', 'real'])
   })
 
-  it('marks the current session', () => {
+  it('marks the Viewed Session', () => {
     const graph = graphFor({
       a: session('a'),
       b: session('b'),
     }, id('b'))
-    expect(graph.nodes.get('a')?.current).toBe(false)
-    expect(graph.nodes.get('b')?.current).toBe(true)
+    expect(graph.nodes.get('a')?.viewed).toBe(false)
+    expect(graph.nodes.get('b')?.viewed).toBe(true)
+  })
+
+  it('derives one Display Status with Running before Waiting for Input before Completed', () => {
+    const list = listState({
+      running: session('running', { running: true, completed: true }),
+      waiting: session('waiting', { completed: true }),
+      completed: session('completed', { completed: true }),
+    })
+    const scope = resolveGraphScope(id('running'), list, workspacesState([]))
+    const graph = deriveSessionGraph(
+      list,
+      scope,
+      id('running'),
+      new Map([[id('running'), {}], [id('waiting'), {}]]),
+    )
+
+    expect(graph.nodes.get('running')?.displayStatus).toBe('running')
+    expect(graph.nodes.get('waiting')?.displayStatus).toBe('waiting-input')
+    expect(graph.nodes.get('completed')?.displayStatus).toBe('completed')
   })
 })
 
-describe('neighborhood', () => {
-  it('collects the branch ancestors, self, and fork descendants — never siblings', () => {
+describe('branchLineage', () => {
+  it('collects the Branch ancestors, self, and descendants — never siblings', () => {
     const graph = graphFor({
       root: session('root', { updatedAt: 500 }),
-      forkChild: session('forkChild', { parentId: id('root'), updatedAt: 400 }),
-      forkChild2: session('forkChild2', { parentId: id('root'), updatedAt: 350 }),
-      grandchild: session('grandchild', { parentId: id('forkChild'), updatedAt: 300 }),
+      branchChild: session('branchChild', { parentId: id('root'), updatedAt: 400 }),
+      branchChild2: session('branchChild2', { parentId: id('root'), updatedAt: 350 }),
+      grandchild: session('grandchild', { parentId: id('branchChild'), updatedAt: 300 }),
       lone: session('lone', { updatedAt: 200 }),
     })
-    const around = neighborhood(graph.nodes.values(), 'forkChild')
-    expect([...around].sort()).toEqual(['forkChild', 'grandchild', 'root'])
-    expect(neighborhood(graph.nodes.values(), 'forkChild2')).toEqual(new Set(['forkChild2', 'root']))
-    expect(neighborhood(graph.nodes.values(), 'lone')).toEqual(new Set(['lone']))
+    const around = branchLineage(graph.nodes.values(), 'branchChild')
+    expect([...around].sort()).toEqual(['branchChild', 'grandchild', 'root'])
+    expect(branchLineage(graph.nodes.values(), 'branchChild2')).toEqual(new Set(['branchChild2', 'root']))
+    expect(branchLineage(graph.nodes.values(), 'lone')).toEqual(new Set(['lone']))
   })
 
   it('returns an empty set for an unknown key and survives branch cycles', () => {
     const graph = graphFor({ solo: session('solo') })
-    expect(neighborhood(graph.nodes.values(), 'ghost').size).toBe(0)
+    expect(branchLineage(graph.nodes.values(), 'ghost').size).toBe(0)
     const cyclic = [
       { id: 'a', branchFrom: 'b' },
       { id: 'b', branchFrom: 'a' },
     ] as unknown as GraphNode[]
-    expect([...neighborhood(cyclic, 'a')].sort()).toEqual(['a', 'b'])
+    expect([...branchLineage(cyclic, 'a')].sort()).toEqual(['a', 'b'])
   })
 })
 

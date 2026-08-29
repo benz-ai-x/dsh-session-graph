@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import ts from 'typescript'
 import { defineConfig } from 'vitest/config'
@@ -18,6 +19,12 @@ const parsed = ts.getParsedCommandLineOfConfigFile(configPath, {}, {
 if (parsed === undefined) throw new Error(`cannot load ${configPath}`)
 const execArgv = process.allowedNodeEnvironmentFlags.has('--webstorage') ? ['--no-webstorage'] : []
 const harnessRequire = createRequire(resolve(harnessRoot, 'apps/web/package.json'))
+const packageManifest = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as {
+  readonly version?: unknown
+}
+if (typeof packageManifest.version !== 'string') {
+  throw new Error('package.json must declare a string version')
+}
 
 const harnessPaths = {
   name: 'dsh-harness-paths',
@@ -42,6 +49,10 @@ const harnessPaths = {
 }
 
 export default defineConfig({
+  define: {
+    __SESSION_GRAPH_VERSION__: JSON.stringify(packageManifest.version),
+    __SESSION_GRAPH_BUILD_ID__: JSON.stringify('test-build'),
+  },
   plugins: [harnessPaths],
   resolve: {
     alias: [

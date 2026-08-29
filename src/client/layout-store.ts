@@ -1,6 +1,6 @@
 /**
- * Manual layout persistence for the session graph, scoped by workspace path
- * and stored in localStorage: dragged node positions, dragged cluster
+ * Session Arrangement persistence for the Session Graph, scoped by Workspace
+ * identity or Directory Scope path and stored in localStorage: node positions, cluster
  * offsets, and collapsed cluster roots as one record. Reads fail soft — a
  * corrupt or foreign payload yields undefined and the view falls back to
  * the auto layout — while writes replace the whole scope record (removed
@@ -20,11 +20,17 @@ export interface ClusterOffset {
   readonly dy: number
 }
 
-/** The persisted layout state of one workspace scope. */
+/** The persisted Session Arrangement of one graph scope. */
 export interface LayoutState {
   readonly positions: Record<string, NodePosition>
   readonly collapsed: readonly string[]
   readonly offsets: Record<string, ClusterOffset>
+}
+
+/** The primary persistence key and optional pre-identity key for one Session Arrangement. */
+export interface SessionArrangementIdentity {
+  readonly key: string
+  readonly legacyKey: string | undefined
 }
 
 /** Persisted layout payload; `v` guards future format changes. */
@@ -43,8 +49,8 @@ function storageKey(scopeKey: string): string {
 }
 
 /**
- * Load the layout state of one workspace scope.
- * @param scopeKey - the workspace scope key (its canonical path).
+ * Load the Session Arrangement of one graph scope.
+ * @param scopeKey - the Workspace identity or Directory Scope path.
  * @param storage - the storage backend (localStorage in the app).
  * @returns the layout state, or undefined when absent or corrupt (the
  *   caller falls back to the auto layout). Malformed entries and coordinates
@@ -100,8 +106,8 @@ export function loadLayout(
 }
 
 /**
- * Replace the layout state of one workspace scope.
- * @param scopeKey - the workspace scope key (its canonical path).
+ * Replace the Session Arrangement of one graph scope.
+ * @param scopeKey - the Workspace identity or Directory Scope path.
  * @param state - the complete layout state to persist.
  * @param storage - the storage backend (localStorage in the app).
  */
@@ -117,4 +123,23 @@ export function saveLayout(
     offsets: { ...state.offsets },
   }
   storage.setItem(storageKey(scopeKey), JSON.stringify(record))
+}
+
+/**
+ * Load a Session Arrangement through its scope identity. When a named
+ * Workspace has no identity-keyed record yet, copy a valid legacy path-keyed
+ * record into that identity and leave the legacy record recoverable.
+ * @param identity - the graph scope's current and optional legacy keys.
+ * @param storage - the storage backend (localStorage in the app).
+ * @returns the current or migrated arrangement, or undefined when neither is valid.
+ */
+export function loadArrangement(
+  identity: SessionArrangementIdentity,
+  storage: Storage = globalThis.localStorage,
+): LayoutState | undefined {
+  const identified = loadLayout(identity.key, storage)
+  if (identified !== undefined || identity.legacyKey === undefined) return identified
+  const legacy = loadLayout(identity.legacyKey, storage)
+  if (legacy !== undefined) saveLayout(identity.key, legacy, storage)
+  return legacy
 }

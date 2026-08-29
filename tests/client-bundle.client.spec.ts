@@ -20,6 +20,10 @@ interface ViewDefinition {
   readonly name: string
   readonly id: string
   readonly label: () => string
+  readonly inject: () => {
+    readonly openSession: (id: string) => void
+    readonly branchSession: (id: string) => Promise<void>
+  }
 }
 
 interface FakeContext {
@@ -78,6 +82,7 @@ describe('tsdown client artifact', () => {
     const { plugin } = await loadArtifact()
     const views: ViewDefinition[] = []
     const disposers: (() => void)[] = []
+    const forkRequests: { readonly sessionId: string; readonly increaseTitle: boolean }[] = []
     const ctx: FakeContext = {
       effect: (install) => {
         const disposer = install()
@@ -100,7 +105,10 @@ describe('tsdown client artifact', () => {
       },
       sessions: {
         open: () => {},
-        fork: async () => 'child',
+        fork: async (request) => {
+          forkRequests.push(request)
+          return 'child'
+        },
       },
     }
 
@@ -108,6 +116,8 @@ describe('tsdown client artifact', () => {
     expect(views).toHaveLength(1)
     expect(views[0]).toMatchObject({ name: 'conversation.view', id: 'graph' })
     expect(views[0]?.label()).toBe('Graph')
+    await views[0]?.inject().branchSession('source')
+    expect(forkRequests).toEqual([{ sessionId: 'source', increaseTitle: true }])
     for (const dispose of disposers.reverse()) dispose()
     expect(views).toHaveLength(0)
   })

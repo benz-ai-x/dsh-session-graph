@@ -1,12 +1,55 @@
 /** Standalone build for the dsh lazy-CJS browser module and its Node loader entries. */
+import { createHash } from 'node:crypto'
+import { readFileSync, readdirSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { dirname, relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { transform } from 'lightningcss'
 import { defineConfig } from 'tsdown'
 
 const PACKAGE_NAME = '@benz-ai-x/dsh-client-ui-session-graph'
+const PROJECT_ROOT = dirname(fileURLToPath(import.meta.url))
 const CSS_PREFIX = '\0dsh-session-graph-css:'
 const CSS_SUFFIX = '.mjs'
+
+const packageManifest = JSON.parse(
+  readFileSync(resolve(PROJECT_ROOT, 'package.json'), 'utf8'),
+) as { readonly name?: unknown; readonly version?: unknown }
+if (packageManifest.name !== PACKAGE_NAME || typeof packageManifest.version !== 'string') {
+  throw new Error(`package.json must declare ${PACKAGE_NAME} with a string version`)
+}
+
+/** Recursively collect stable build inputs for the local content fingerprint. */
+function filesUnder(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true })
+    .flatMap(entry => {
+      const path = resolve(directory, entry.name)
+      return entry.isDirectory() ? filesUnder(path) : [path]
+    })
+    .sort()
+}
+
+/** A reproducible Build ID that changes whenever browser build inputs change. */
+function localBuildId(): string {
+  const hash = createHash('sha256')
+  const inputs = [
+    resolve(PROJECT_ROOT, 'package.json'),
+    resolve(PROJECT_ROOT, 'tsdown.config.ts'),
+    ...filesUnder(resolve(PROJECT_ROOT, 'src')),
+  ]
+  for (const file of inputs) {
+    hash.update(relative(PROJECT_ROOT, file))
+    hash.update('\0')
+    hash.update(readFileSync(file))
+    hash.update('\0')
+  }
+  return `local-${hash.digest('hex').slice(0, 8)}`
+}
+
+const buildIdOverride = process.env.DSH_SESSION_GRAPH_BUILD_ID?.trim()
+const BUILD_ID = buildIdOverride === undefined || buildIdOverride === ''
+  ? localBuildId()
+  : buildIdOverride
 
 const SHARED_MODULES = new Set([
   'react',
@@ -92,6 +135,8 @@ export default defineConfig([
       onlyBundle: ['clsx'],
     },
     define: {
+      __SESSION_GRAPH_VERSION__: JSON.stringify(packageManifest.version),
+      __SESSION_GRAPH_BUILD_ID__: JSON.stringify(BUILD_ID),
       'process.env': '{}',
       'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
       'import.meta.env.MODE': JSON.stringify(process.env.NODE_ENV ?? 'production'),
