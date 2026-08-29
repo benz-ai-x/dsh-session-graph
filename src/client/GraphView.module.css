@@ -414,31 +414,45 @@
   box-shadow: var(--dsw-shadow-lv2);
 }
 
-/* Stable connection seats for future graph editing. They are deliberately
-   non-interactive today: pointer gestures continue to belong to the card,
-   while data-session-port/data-port-id provide the later wiring contract. */
+/* Stable connection seats for future graph editing. The element keeps a
+   generous 20px interaction seat while the pseudo-element draws a quieter
+   10px terminal. They are deliberately non-interactive today: pointer
+   gestures continue to belong to the card, while data-session-port/
+   data-port-id provide the later wiring contract. */
 .nodePort {
   position: absolute;
   z-index: 4;
-  width: 14px;
-  height: 14px;
+  width: 20px;
+  height: 20px;
   box-sizing: border-box;
-  border: 2px solid var(--dsw-alias-label-tertiary);
+  border-radius: 50%;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.nodePort::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  content: '';
+  border: 1.5px solid var(--dsw-alias-label-tertiary);
   border-radius: 50%;
   background: var(--dsw-alias-bg-layer-3);
-  pointer-events: none;
   transform: translate(-50%, -50%);
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-.node:hover + .nodePort,
-.node:hover + .nodePort + .nodePort,
-.node[aria-current='true'] + .nodePort,
-.node[aria-current='true'] + .nodePort + .nodePort,
-.nodeSelected + .nodePort,
-.nodeSelected + .nodePort + .nodePort {
+.node:hover + .nodePort::after,
+.node:hover + .nodePort + .nodePort::after,
+.node[aria-current='true'] + .nodePort::after,
+.node[aria-current='true'] + .nodePort + .nodePort::after,
+.nodeSelected + .nodePort::after,
+.nodeSelected + .nodePort + .nodePort::after {
   border-color: var(--dsw-alias-state-business-primary);
-  box-shadow: 0 0 0 2px var(--dsw-alias-bg-layer-3);
+  box-shadow: 0 0 0 1.5px var(--dsw-alias-bg-layer-3);
 }
 
 .node[aria-current='true'] {
@@ -528,9 +542,11 @@
   z-index: 12;
   right: 16px;
   top: 60px;
-  width: 280px;
+  width: 420px;
   max-height: calc(100% - 76px);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   box-sizing: border-box;
   padding: 16px;
   border-radius: 12px;
@@ -540,6 +556,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  cursor: default;
 }
 
 .panelHeader {
@@ -609,6 +626,176 @@
   line-height: 18px;
   color: var(--dsw-alias-label-secondary);
   overflow-wrap: anywhere;
+}
+
+.digestSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.digestHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.digestTitle,
+.digestGroupTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.digestBadges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.digestSnapshot,
+.digestStale {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.digestSnapshot {
+  color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-state-business-tertiary);
+}
+
+.digestStale {
+  color: var(--dsw-alias-state-warn-primary);
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.digestEmptyState,
+.digestFailure {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.digestEmptyState p,
+.digestQuiet,
+.digestFailure > span {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.digestGenerating {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.digestSpinner {
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--dsw-alias-border-l2);
+  border-top-color: var(--dsw-alias-state-business-primary);
+  border-radius: 50%;
+  animation: dshSessionDigestSpin 800ms linear infinite;
+}
+
+@keyframes dshSessionDigestSpin {
+  to { transform: rotate(360deg); }
+}
+
+.digestBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(54vh, 560px);
+  padding-right: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  cursor: grab;
+  touch-action: none;
+}
+
+.digestBody[data-dragging='true'] {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.digestOverview {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+  overflow-wrap: anywhere;
+}
+
+.digestGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.digestGroup ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.digestGroup li {
+  overflow-wrap: anywhere;
+}
+
+.digestMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.digestAction {
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-module-platform);
+  cursor: pointer;
+}
+
+.digestAction:hover {
+  border-color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.digestAction:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
+.digestFailure > span {
+  color: var(--dsw-alias-state-error-primary);
 }
 
 .panelError {
@@ -791,6 +978,10 @@
     max-height: min(52%, 360px);
   }
 
+  .digestBody {
+    max-height: min(28vh, 240px);
+  }
+
   /* The bottom-sheet inspector owns the navigation corner on narrow views. */
   .panel ~ .minimap {
     display: none;
@@ -803,10 +994,14 @@
 
 @media (prefers-reduced-motion: reduce) {
   .node,
-  .nodePort,
+  .nodePort::after,
   .frame,
   .edgeGroup,
   .body {
     transition: none;
+  }
+
+  .digestSpinner {
+    animation: none;
   }
 }

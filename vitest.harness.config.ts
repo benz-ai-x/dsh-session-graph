@@ -48,12 +48,34 @@ const harnessPaths = {
   },
 }
 
+const standardDecorators = {
+  name: 'dsh-session-graph-test-standard-decorators',
+  enforce: 'pre' as const,
+  transform(code: string, id: string) {
+    const file = id.split('?', 1)[0] ?? id
+    if (!/\.[cm]?tsx?$/.test(file) || !/^\s*@[A-Za-z_$][\w$]*/m.test(code)) return undefined
+    const result = ts.transpileModule(code, {
+      fileName: file,
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2024,
+        module: ts.ModuleKind.ESNext,
+        ...(file.endsWith('x') ? { jsx: ts.JsxEmit.ReactJSX } : {}),
+        sourceMap: true,
+      },
+    })
+    return {
+      code: result.outputText.replace(/\n?\/\/# sourceMappingURL=.*$/u, '\n'),
+      map: result.sourceMapText,
+    }
+  },
+}
+
 export default defineConfig({
   define: {
     __SESSION_GRAPH_VERSION__: JSON.stringify(packageManifest.version),
     __SESSION_GRAPH_BUILD_ID__: JSON.stringify('test-build'),
   },
-  plugins: [harnessPaths],
+  plugins: [standardDecorators, harnessPaths],
   resolve: {
     alias: [
       {
@@ -74,7 +96,7 @@ export default defineConfig({
   },
   test: {
     execArgv,
-    include: ['tests/views.client.spec.tsx'],
+    include: ['tests/views.client.spec.tsx', 'tests/host.harness.spec.ts'],
     pool: 'forks',
     server: {
       deps: {

@@ -5,7 +5,7 @@ const execArgv = process.allowedNodeEnvironmentFlags.has('--webstorage') ? ['--n
 export default defineConfig({
   test: {
     include: ['tests/**/*.spec.{ts,tsx}'],
-    exclude: ['tests/views.client.spec.tsx'],
+    exclude: ['tests/views.client.spec.tsx', 'tests/**/*.harness.spec.{ts,tsx}'],
     execArgv,
     pool: 'forks',
   },

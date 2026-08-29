@@ -7,7 +7,7 @@
  * badges, selection stays local until explicit navigation, and fiber
  * disposal removes the tab.
  */
-import { Context } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { FC, ReactNode } from 'react'
@@ -34,6 +34,7 @@ import { zh as conversationZh } from '@deepseek-ai/dsh-client-ui-conversation/sr
 import { apply as localeApply, inject as localeInject } from '@deepseek-ai/dsh-client-locale/client'
 import type { LocaleKeysOf } from '@deepseek-ai/dsh-client-ui-slots'
 import { apply, inject } from '@benz-ai-x/dsh-client-ui-session-graph/client'
+import packageMetadata from '../package.json'
 import { zh, type SessionGraphKey } from '../src/client/locales.ts'
 
 const id = (value: string): SessionId => value as SessionId
@@ -120,6 +121,10 @@ async function bench(byId: Record<string, SessionSummary>) {
   const sessionsStore = createSnapshotStore(listState(byId))
   const open = vi.fn()
   const fork = vi.fn(async () => id('branched'))
+  const generateDigest = vi.fn(async () => ({
+    ok: true as const,
+    value: { kind: 'empty' as const },
+  }))
   ctx.provide('sessions', { open, fork })
   slots.register({
     name: 'root',
@@ -129,12 +134,22 @@ async function bench(byId: Record<string, SessionSummary>) {
   slots.register(
     { name: 'conversation.view', id: 'chat', order: 0, label: 'Chat' } as never, chatBody as never)
   ctx.provide('connection', { api: { settings: {} }, isLoopback: false } as never)
-  ctx.provide('remote', { $on: () => () => {} } as never)
+  class RemoteStub extends Service {
+    constructor(remoteCtx: Context) { super(remoteCtx, 'remote') }
+    $on(): () => void { return () => {} }
+    async $mount(): Promise<() => Promise<void>> { return async () => {} }
+  }
+  new RemoteStub(ctx)
+  // The real Gateway creates a separately injectable service for every
+  // mounted namespace; mirror that boundary instead of hanging it off the
+  // root Remote stub.
+  ctx.provide('remote.sessionGraphDigest', { generate: generateDigest } as never)
   ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
-  ctx.plugin({ inject: [...localeInject], apply: localeApply })
+  const localeFiber = ctx.plugin({ inject: [...localeInject], apply: localeApply })
+  await localeFiber
   const fiber = ctx.plugin({ inject: [...inject], apply })
-  await fiber.await()
-  return { ctx, slots, fiber, sessionsStore, open, fork }
+  await fiber
+  return { ctx, slots, fiber, sessionsStore, open, fork, generateDigest }
 }
 
 /** Tab projection twin of apply's viewTabs (the render-side consumption path). */
@@ -275,6 +290,43 @@ function branchActionButton(): HTMLButtonElement {
   return button
 }
 
+function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value: T) => void } {
+  let resolvePromise: ((value: T) => void) | undefined
+  const promise = new Promise<T>((resolve) => { resolvePromise = resolve })
+  return {
+    promise,
+    resolve: value => { resolvePromise?.(value) },
+  }
+}
+
+function digestSuccess(sessionId: string, over: {
+  readonly overview?: string
+  readonly generatedWhileRunning?: boolean
+  readonly sourceRevision?: string
+  readonly sourceTurnCount?: number
+  readonly generatedAt?: number
+  readonly keyOutcomes?: readonly string[]
+  readonly openItems?: readonly string[]
+} = {}) {
+  return {
+    ok: true as const,
+    value: {
+      kind: 'ready' as const,
+      cached: false as const,
+      digest: {
+        sessionId,
+        sourceRevision: over.sourceRevision ?? '1',
+        sourceTurnCount: over.sourceTurnCount ?? 1,
+        generatedAt: over.generatedAt ?? 2_000,
+        generatedWhileRunning: over.generatedWhileRunning ?? false,
+        overview: over.overview ?? `Digest for ${sessionId}`,
+        keyOutcomes: over.keyOutcomes ?? [],
+        openItems: over.openItems ?? [],
+      },
+    },
+  }
+}
+
 const FIXTURE: Record<string, SessionSummary> = {
   root: session('root', { updatedAt: 500 }),
   branchChild: session('branchChild', { parentId: id('root'), updatedAt: 400 }),
@@ -309,9 +361,9 @@ describe('graph tab rendering and interaction', () => {
     mount(b.slots, b.sessionsStore, 'root')
     switchTab('Graph')
 
-    const badge = screen.getByText('Session Graph v0.1.0 · test-build')
+    const badge = screen.getByText(`Session Graph v${packageMetadata.version} · test-build`)
     expect(badge.getAttribute('title')).toBe(
-      '@benz-ai-x/dsh-client-ui-session-graph v0.1.0 · build test-build',
+      `@benz-ai-x/dsh-client-ui-session-graph v${packageMetadata.version} · build test-build`,
     )
   })
 
@@ -1087,6 +1139,274 @@ describe('node selection, double-click, and keyboard navigation', () => {
     fireEvent.click(branchActionButton())
     expect(b.fork).toHaveBeenCalledWith({ sessionId: id('root'), increaseTitle: true })
     expect(panel.isConnected).toBe(true)
+  })
+
+  it('keeps wheel gestures inside the Selected Session inspector out of canvas zoom', async () => {
+    const b = await bench(FIXTURE)
+    mount(b.slots, b.sessionsStore, 'root')
+    switchTab('Graph')
+    fireEvent.click(screen.getByRole('button', { name: '缩放至 100%' }))
+    fireEvent.click(nodeButton('root'))
+
+    fireEvent.wheel(screen.getByTestId('session-graph-panel'), {
+      deltaY: 120,
+      clientX: 900,
+      clientY: 320,
+    })
+
+    expect(screen.getByRole('button', { name: '缩放至 100%' }).textContent).toBe('100%')
+    expect(screen.getByTestId('session-graph-panel')).toBeTruthy()
+  })
+
+  it('drag-scrolls a long Session Digest without starting a canvas pan', async () => {
+    const b = await bench(FIXTURE)
+    b.generateDigest.mockResolvedValueOnce(digestSuccess('root', {
+      overview: '可拖动的长摘要。',
+    }) as never)
+    mount(b.slots, b.sessionsStore, 'root')
+    switchTab('Graph')
+    fireEvent.click(nodeButton('root'))
+    fireEvent.click(screen.getByRole('button', { name: '生成摘要' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-digest-section').textContent).toContain('可拖动的长摘要。')
+    })
+    const scroller = screen.getByTestId('session-digest-scroll') as HTMLDivElement
+    Object.defineProperties(scroller, {
+      clientHeight: { configurable: true, value: 240 },
+      scrollHeight: { configurable: true, value: 800 },
+    })
+    scroller.scrollTop = 120
+
+    fireEvent.pointerDown(scroller, {
+      pointerId: 41,
+      pointerType: 'mouse',
+      button: 0,
+      clientY: 220,
+    })
+    fireEvent.pointerMove(scroller, {
+      pointerId: 41,
+      pointerType: 'mouse',
+      clientY: 160,
+    })
+    fireEvent.pointerUp(scroller, { pointerId: 41, pointerType: 'mouse' })
+
+    expect(scroller.scrollTop).toBe(180)
+    expect(nodeButton('root').getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByTestId('session-graph-panel')).toBeTruthy()
+  })
+
+  it('generates and presents a structured Session Digest without blocking navigation actions', async () => {
+    const b = await bench(FIXTURE)
+    const pending = deferred<{
+      readonly ok: true
+      readonly value: {
+        readonly kind: 'ready'
+        readonly cached: false
+        readonly digest: {
+          readonly sessionId: string
+          readonly sourceRevision: string
+          readonly sourceTurnCount: number
+          readonly generatedAt: number
+          readonly generatedWhileRunning: boolean
+          readonly overview: string
+          readonly keyOutcomes: readonly string[]
+          readonly openItems: readonly string[]
+        }
+      }
+    }>()
+    b.generateDigest.mockImplementationOnce(() => pending.promise)
+    mount(b.slots, b.sessionsStore, 'root')
+    switchTab('Graph')
+    fireEvent.click(nodeButton('root'))
+
+    const digest = screen.getByTestId('session-digest-section')
+    expect(screen.getByRole('region', { name: '会话摘要' })).toBe(digest)
+    expect(digest.textContent).toContain('按需生成本会话的概览、关键结论和待办')
+    fireEvent.click(screen.getByRole('button', { name: '生成摘要' }))
+    expect(digest.textContent).toContain('正在生成摘要')
+    expect((screen.getByRole('button', { name: '打开会话' }) as HTMLButtonElement).disabled).toBe(false)
+    expect((screen.getByRole('button', { name: '开新分支' }) as HTMLButtonElement).disabled).toBe(false)
+
+    pending.resolve({
+      ok: true,
+      value: {
+        kind: 'ready',
+        cached: false,
+        digest: {
+          sessionId: 'root',
+          sourceRevision: '12',
+          sourceTurnCount: 3,
+          generatedAt: 2_000,
+          generatedWhileRunning: false,
+          overview: '会话确定了按需生成摘要的方案。',
+          keyOutcomes: ['摘要不写入会话日志。'],
+          openItems: ['完成视觉验证。'],
+        },
+      },
+    })
+
+    await waitFor(() => {
+      expect(digest.textContent).toContain('会话确定了按需生成摘要的方案。')
+    })
+    expect(digest.textContent).toContain('关键结论')
+    expect(digest.textContent).toContain('摘要不写入会话日志。')
+    expect(digest.textContent).toContain('待处理')
+    expect(digest.textContent).toContain('完成视觉验证。')
+    expect(digest.textContent).toContain('基于 3 轮对话')
+    expect(screen.getByRole('button', { name: '重新生成' })).toBeTruthy()
+    expect(b.generateDigest).toHaveBeenCalledWith(
+      { sessionId: id('root'), refresh: false },
+      expect.any(AbortSignal),
+    )
+  })
+
+  it('marks a running digest as a snapshot, detects new Session content, and refreshes in place', async () => {
+    const b = await bench(FIXTURE)
+    b.generateDigest.mockResolvedValueOnce(digestSuccess('root', {
+      overview: '旧摘要仍可阅读。',
+      generatedWhileRunning: true,
+    }) as never)
+    const refresh = deferred<ReturnType<typeof digestSuccess>>()
+    b.generateDigest.mockImplementationOnce(() => refresh.promise as never)
+    mount(b.slots, b.sessionsStore, 'root')
+    switchTab('Graph')
+    fireEvent.click(nodeButton('root'))
+    fireEvent.click(screen.getByRole('button', { name: '生成摘要' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-digest-section').textContent).toContain('旧摘要仍可阅读。')
+    })
+    expect(screen.getByTestId('session-digest-section').textContent).toContain('运行中快照')
+
+    act(() => {
+      b.sessionsStore.set(listState({
+        ...FIXTURE,
+        root: session('root', { updatedAt: 600 }),
+      }))
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('session-digest-section').textContent).toContain('会话有新内容')
+    })
+    fireEvent.click(screen.getByRole('button', { name: '更新摘要' }))
+    expect(screen.getByTestId('session-digest-section').textContent).toContain('正在更新摘要')
+    expect(screen.getByTestId('session-digest-section').textContent).toContain('旧摘要仍可阅读。')
+    expect(b.generateDigest).toHaveBeenLastCalledWith(
+      { sessionId: id('root'), refresh: true },
+      expect.any(AbortSignal),
+    )
+
+    refresh.resolve(digestSuccess('root', { overview: '新摘要已覆盖旧快照。' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('session-digest-section').textContent).toContain('新摘要已覆盖旧快照。')
+    })
+    expect(screen.getByTestId('session-digest-section').textContent).not.toContain('会话有新内容')
+  })
+
+  it('shows an empty state for a blank Session without calling the Host', async () => {
+    const b = await bench({ blank: session('blank', { blank: true }) })
+    mount(b.slots, b.sessionsStore, 'blank')
+    switchTab('Graph')
+    fireEvent.click(nodeButton('blank'))
+
+    expect(screen.getByTestId('session-digest-section').textContent)
+      .toContain('暂无可总结的会话内容')
+    expect(screen.queryByRole('button', { name: '生成摘要' })).toBeNull()
+    expect(b.generateDigest).not.toHaveBeenCalled()
+  })
+
+  it('reopens generation after a previously empty Session receives new content', async () => {
+    const b = await bench(FIXTURE)
+    mount(b.slots, b.sessionsStore, 'root')
+    switchTab('Graph')
+    fireEvent.click(nodeButton('root'))
+    fireEvent.click(screen.getByRole('button', { name: '生成摘要' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('session-digest-section').textContent)
+        .toContain('暂无可总结的会话内容')
+    })
+
+    act(() => {
+      b.sessionsStore.set(listState({
+        ...FIXTURE,
+        root: session('root', { updatedAt: 600 }),
+      }))
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '生成摘要' })).toBeTruthy()
+    })
+  })
+
+  it('shows a retryable error when Session Digest generation fails', async () => {
+    const b = await bench(FIXTURE)
+    b.generateDigest.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'generation-failed', message: 'offline', details: {} },
+    } as never)
+    mount(b.slots, b.sessionsStore, 'root')
+    switchTab('Graph')
+    fireEvent.click(nodeButton('root'))
+    fireEvent.click(screen.getByRole('button', { name: '生成摘要' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('摘要生成失败，请重试')
+    })
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('session-digest-section').textContent)
+        .toContain('暂无可总结的会话内容')
+    })
+    expect(b.generateDigest).toHaveBeenCalledTimes(2)
+  })
+
+  it('explains when Session Digest generation has no usable model route', async () => {
+    const b = await bench(FIXTURE)
+    b.generateDigest.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: 'model-route-unavailable',
+        message: 'no recorded or configured route',
+        details: {},
+      },
+    } as never)
+    mount(b.slots, b.sessionsStore, 'root')
+    switchTab('Graph')
+    fireEvent.click(nodeButton('root'))
+    fireEvent.click(screen.getByRole('button', { name: '生成摘要' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent)
+        .toContain('此会话没有可用的模型路由，请配置兜底模型后重试')
+    })
+    expect(screen.getByRole('alert').getAttribute('data-error-code'))
+      .toBe('model-route-unavailable')
+    expect(screen.getByRole('alert').getAttribute('title'))
+      .toBe('no recorded or configured route')
+  })
+
+  it('cancels generation on selection change and ignores the previous Session late result', async () => {
+    const b = await bench(FIXTURE)
+    const pending = deferred<ReturnType<typeof digestSuccess>>()
+    b.generateDigest.mockImplementationOnce(() => pending.promise as never)
+    mount(b.slots, b.sessionsStore, 'root')
+    switchTab('Graph')
+    fireEvent.click(nodeButton('root'))
+    fireEvent.click(screen.getByRole('button', { name: '生成摘要' }))
+    const rootSignal = b.generateDigest.mock.calls[0]?.[1] as AbortSignal
+
+    fireEvent.click(nodeButton('branchChild'))
+    await waitFor(() => { expect(rootSignal.aborted).toBe(true) })
+    pending.resolve(digestSuccess('root', { overview: '不得显示的迟到摘要。' }))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const panel = screen.getByTestId('session-graph-panel')
+    expect(panel.textContent).toContain('Session branchChild')
+    expect(panel.textContent).not.toContain('不得显示的迟到摘要。')
+    fireEvent.click(nodeButton('root'))
+    expect(screen.getByTestId('session-digest-section').textContent)
+      .toContain('按需生成本会话的概览、关键结论和待办')
   })
 
   it('exposes a named Selected Session inspector that can be closed explicitly', async () => {

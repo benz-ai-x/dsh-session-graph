@@ -27,6 +27,64 @@ declare module '@deepseek-ai/dsh-api-session-controller/client' {
   }
 }
 
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  export interface RemoteFailure {
+    readonly code: string
+    readonly message: string
+    readonly details: object
+  }
+  export type RemoteResult<T> =
+    | { readonly ok: true; readonly value: T }
+    | { readonly ok: false; readonly error: RemoteFailure }
+  export interface TypertSchema<Output = unknown> {
+    parse(value: unknown): Output
+  }
+  export interface TypertRemoteContribution {
+    readonly package: string
+    readonly descriptors: readonly Readonly<Record<string, unknown>>[]
+  }
+  export interface TypertRemoteMap {
+    'sessionGraphDigest/generate': (
+      request: import('../src/session-digest.ts').SessionDigestRequest,
+      signal?: AbortSignal,
+    ) => Promise<RemoteResult<import('../src/session-digest.ts').SessionDigestResult>>
+  }
+  export interface TypertRemoteNamespaceMap {
+    sessionGraphDigest: {
+      generate: TypertRemoteMap['sessionGraphDigest/generate']
+    }
+  }
+  export class TypertRemoteFailure extends Error {
+    readonly failure: RemoteFailure
+    constructor(failure: RemoteFailure)
+  }
+  export abstract class TypertRemoteService {
+    protected constructor(ctx: import('@deepseek-ai/cordis').Context, serviceKey: string)
+  }
+  export function Remote(name: string): (
+    method: (...args: never[]) => unknown,
+    context: ClassMethodDecoratorContext,
+  ) => void
+}
+
+declare module '@deepseek-ai/dsh-llm' {
+  export interface DigestContentBlock {
+    readonly type: string
+    readonly text?: string
+  }
+  export class BlockAssembler {
+    push(chunk: unknown): void
+    readonly finish: { readonly kind: string }
+    blocks(): DigestContentBlock[]
+  }
+  export function createUserMessage(input: {
+    readonly content: readonly { readonly type: 'text'; readonly text: string }[]
+    readonly source: { readonly kind: 'plugin'; readonly plugin: string }
+  }): unknown
+}
+
+declare module '@deepseek-ai/dsh-api-remotes/client' {}
+
 declare module '@deepseek-ai/dsh-api-workspace-controller/client' {
   export interface WorkspaceView {
     readonly workspaceId: string
@@ -76,6 +134,10 @@ declare module '@deepseek-ai/dsh-client-ui-workspace/client' {}
 
 declare module '@deepseek-ai/cordis' {
   export interface Context {
+    inject(
+      services: readonly string[],
+      apply: (ctx: Context) => void | Promise<void>,
+    ): Promise<void> & { dispose: () => Promise<void> }
     readonly locale: {
       register: (namespace: string, dictionaries: Readonly<Record<string, object>>) => () => void
       bind: (namespace: string) => (key: string, params?: Record<string, unknown>) => string
@@ -94,8 +156,23 @@ declare module '@deepseek-ai/cordis' {
         readonly increaseTitle: boolean
       }) => Promise<unknown>
     }
+    readonly remote: {
+      $mount: (
+        contribution: import('@deepseek-ai/dsh-typert-protocol').TypertRemoteContribution,
+      ) => Promise<() => Promise<void>>
+      sessionGraphDigest: import('@deepseek-ai/dsh-typert-protocol').TypertRemoteNamespaceMap['sessionGraphDigest']
+    }
     readonly invariants: {
       register: (packageName: string, installer: unknown) => () => void
+    }
+    readonly sessionPersistence: {
+      inspect: (
+        sessionId: import('@deepseek-ai/dsh-session/types').SessionId,
+        signal?: AbortSignal,
+      ) => Promise<import('../src/session-digest-harness.ts').HarnessSessionDigestSource>
+    }
+    readonly llm: {
+      stream: (options: Readonly<Record<string, unknown>>) => AsyncIterable<unknown>
     }
     effect: (install: () => unknown, label: string) => void
   }

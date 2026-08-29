@@ -41,6 +41,23 @@ export type SessionGraphKey =
   | 'panel.branch'
   | 'panel.branchError'
   | 'panel.subagents'
+  | 'digest.title'
+  | 'digest.intro'
+  | 'digest.generate'
+  | 'digest.generating'
+  | 'digest.refreshing'
+  | 'digest.refresh'
+  | 'digest.regenerate'
+  | 'digest.retry'
+  | 'digest.stale'
+  | 'digest.snapshot'
+  | 'digest.empty'
+  | 'digest.error'
+  | 'digest.errorRoute'
+  | 'digest.errorOutput'
+  | 'digest.outcomes'
+  | 'digest.openItems'
+  | 'digest.turns'
   | 'preview.status.running'
   | 'preview.status.pending'
   | 'preview.status.completed'
@@ -93,6 +110,23 @@ export const zh: Record<SessionGraphKey, string> = {
   'panel.branch': '开新分支',
   'panel.branchError': '无法创建分支，请重试',
   'panel.subagents': '{count} 子代理',
+  'digest.title': '会话摘要',
+  'digest.intro': '按需生成本会话的概览、关键结论和待办。',
+  'digest.generate': '生成摘要',
+  'digest.generating': '正在生成摘要…',
+  'digest.refreshing': '正在更新摘要…',
+  'digest.refresh': '更新摘要',
+  'digest.regenerate': '重新生成',
+  'digest.retry': '重试',
+  'digest.stale': '会话有新内容',
+  'digest.snapshot': '运行中快照',
+  'digest.empty': '暂无可总结的会话内容',
+  'digest.error': '摘要生成失败，请重试',
+  'digest.errorRoute': '此会话没有可用的模型路由，请配置兜底模型后重试',
+  'digest.errorOutput': '模型返回的摘要格式无效，请重试',
+  'digest.outcomes': '关键结论',
+  'digest.openItems': '待处理',
+  'digest.turns': '基于 {count} 轮对话',
   'preview.status.running': '运行中',
   'preview.status.pending': '等待输入',
   'preview.status.completed': '已完成',
@@ -139,6 +173,23 @@ export const en: Record<SessionGraphKey, string> = {
   'panel.branch': 'New branch',
   'panel.branchError': "Couldn't create the branch. Try again",
   'panel.subagents': '{count} subagents',
+  'digest.title': 'Session digest',
+  'digest.intro': 'Generate an overview, key outcomes, and open items on demand.',
+  'digest.generate': 'Generate digest',
+  'digest.generating': 'Generating digest…',
+  'digest.refreshing': 'Updating digest…',
+  'digest.refresh': 'Update digest',
+  'digest.regenerate': 'Regenerate',
+  'digest.retry': 'Try again',
+  'digest.stale': 'Session has new content',
+  'digest.snapshot': 'Running snapshot',
+  'digest.empty': 'No Session content to summarize yet',
+  'digest.error': "Couldn't generate the digest. Try again",
+  'digest.errorRoute': 'This Session has no usable model route. Configure a fallback model and try again',
+  'digest.errorOutput': 'The model returned an invalid digest format. Try again',
+  'digest.outcomes': 'Key outcomes',
+  'digest.openItems': 'Open items',
+  'digest.turns': 'Based on {count} turns',
   'preview.status.running': 'Running',
   'preview.status.pending': 'Waiting for input',
   'preview.status.completed': 'Completed',

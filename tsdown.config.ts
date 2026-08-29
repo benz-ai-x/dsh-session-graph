@@ -6,6 +6,7 @@ import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { transform } from 'lightningcss'
 import { defineConfig } from 'tsdown'
+import ts from 'typescript'
 
 const PACKAGE_NAME = '@benz-ai-x/dsh-client-ui-session-graph'
 const PROJECT_ROOT = dirname(fileURLToPath(import.meta.url))
@@ -105,6 +106,29 @@ const cssModulesPlugin = {
   },
 }
 
+/** Lower standard decorators before Rolldown preserves them in the Node output. */
+const standardDecoratorsPlugin = {
+  name: 'dsh-session-graph-standard-decorators',
+  enforce: 'pre' as const,
+  transform(code: string, id: string) {
+    const file = id.split('?', 1)[0] ?? id
+    if (!/\.[cm]?tsx?$/.test(file) || !/^\s*@[A-Za-z_$][\w$]*/m.test(code)) return undefined
+    const result = ts.transpileModule(code, {
+      fileName: file,
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2024,
+        module: ts.ModuleKind.ESNext,
+        ...(file.endsWith('x') ? { jsx: ts.JsxEmit.ReactJSX } : {}),
+        sourceMap: true,
+      },
+    })
+    return {
+      code: result.outputText.replace(/\n?\/\/# sourceMappingURL=.*$/u, '\n'),
+      map: result.sourceMapText,
+    }
+  },
+}
+
 const nodeEntry = (entry: string) => ({
   entry: [entry],
   outDir: 'lib',
@@ -114,6 +138,10 @@ const nodeEntry = (entry: string) => ({
   fixedExtension: false,
   dts: false,
   clean: false,
+  deps: {
+    neverBundle: (specifier: string) => specifier.startsWith('@deepseek-ai/'),
+  },
+  plugins: [standardDecoratorsPlugin],
 })
 
 export default defineConfig([

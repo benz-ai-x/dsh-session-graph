@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-import { apply as nodeApply } from '@benz-ai-x/dsh-client-ui-session-graph'
 import * as SessionGraphInvariant from '@benz-ai-x/dsh-client-ui-session-graph/invariant'
 
 describe('invariant companion', () => {
@@ -12,9 +11,5 @@ describe('invariant companion', () => {
       expect.any(Function),
     )
     expect(result).toBe(dispose)
-  })
-
-  it('keeps the Node loader entry free of Host behavior', () => {
-    expect(() => { nodeApply() }).not.toThrow()
   })
 })

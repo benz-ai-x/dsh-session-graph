@@ -106,6 +106,10 @@ _Avoid_: Search, session filter
 The persistent detail panel for the Selected Session. It remains authoritative while another Canvas Session is only being previewed.
 _Avoid_: Hover card, current-session panel
 
+**Session Digest**:
+An explicitly requested, model-generated, read-only digest of one Canvas Session at one source revision. It presents a short overview, key outcomes, and open items inside the Session Inspector. A newer source revision makes an existing digest stale without hiding it. Session Digests never enter the Session log or change Session Lineage.
+_Avoid_: Session Summary, Subagent Summary, compaction summary, generated message
+
 **Session Preview**:
 A transient, delayed summary shown while dwelling on a Canvas Session other than the Selected Session. It never changes selection.
 _Avoid_: Inspector, tooltip

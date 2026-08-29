@@ -9,6 +9,7 @@ import { useMemo, type ReactElement } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import type { SessionDigestResult } from '../session-digest.ts'
 import { SESSION_GRAPH_BUILD_LABEL, SESSION_GRAPH_BUILD_TITLE } from './build-info.ts'
 import { GraphCanvas } from './GraphCanvas.tsx'
 import { deriveSessionGraph, resolveGraphScope } from './graph-model.ts'
@@ -21,6 +22,12 @@ export interface GraphViewInjected {
   openSession: (id: SessionId) => void
   /** Create a Branch from one session (the panel's New-branch verb). */
   branchSession: (id: SessionId) => Promise<void>
+  /** Explicitly generate or refresh one read-only Session Digest. */
+  generateSessionDigest: (
+    id: SessionId,
+    options: { readonly refresh: boolean },
+    signal: AbortSignal,
+  ) => Promise<SessionDigestResult>
 }
 
 /** The graph view tab's composed props: runtime share + inject face + locale. */
@@ -36,7 +43,7 @@ export type GraphViewProps =
  */
 export function GraphView({
   sessionId, useSessions, useSessionPendingInteraction, useWorkspaces,
-  openSession, branchSession, t,
+  openSession, branchSession, generateSessionDigest, t,
 }: GraphViewProps): ReactElement {
   const sessions = useSessions(state => state)
   const pendingInteractions = useSessionPendingInteraction(state => state)
@@ -89,6 +96,7 @@ export function GraphView({
         t={t}
         onOpen={openSession}
         onBranch={branchSession}
+        onGenerateDigest={generateSessionDigest}
       />
     </div>
   )

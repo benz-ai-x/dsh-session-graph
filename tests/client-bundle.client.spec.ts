@@ -2,7 +2,7 @@
 /** Executes the packed browser-module format against a minimal dsh Client context. */
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const PLUGIN_ID = '@benz-ai-x/dsh-client-ui-session-graph'
 
@@ -13,7 +13,7 @@ interface Handoff {
 
 interface ClientPlugin {
   readonly inject: readonly string[]
-  readonly apply: (ctx: FakeContext) => void
+  readonly apply: (ctx: FakeContext) => void | Promise<void | (() => Promise<void>)>
 }
 
 interface ViewDefinition {
@@ -23,10 +23,19 @@ interface ViewDefinition {
   readonly inject: () => {
     readonly openSession: (id: string) => void
     readonly branchSession: (id: string) => Promise<void>
+    readonly generateSessionDigest: (
+      id: string,
+      options: { readonly refresh: boolean },
+      signal: AbortSignal,
+    ) => Promise<unknown>
   }
 }
 
 interface FakeContext {
+  inject: (
+    services: readonly string[],
+    apply: (ctx: FakeContext) => void,
+  ) => Promise<void> & { dispose: () => Promise<void> }
   effect: (install: () => unknown, label: string) => void
   locale: {
     register: (namespace: string, dictionaries: Readonly<Record<string, object>>) => () => void
@@ -39,6 +48,12 @@ interface FakeContext {
   sessions: {
     open: (id: string) => void
     fork: (request: { readonly sessionId: string; readonly increaseTitle: boolean }) => Promise<string>
+  }
+  remote: {
+    $mount: (contribution: unknown) => Promise<() => Promise<void>>
+    sessionGraphDigest: {
+      generate: (request: unknown, signal: AbortSignal) => Promise<unknown>
+    }
   }
 }
 
@@ -75,18 +90,47 @@ describe('tsdown client artifact', () => {
     const { handoff, plugin } = await loadArtifact()
     expect(handoff.id).toBe(PLUGIN_ID)
     expect(plugin.apply).toBeTypeOf('function')
-    expect(plugin.inject).toEqual(['slots', 'sessions', 'locale'])
+    expect(plugin.inject).toEqual(['slots', 'sessions', 'locale', 'remote'])
   })
 
   it('registers and disposes the Graph view through the dsh Client services', async () => {
     const { plugin } = await loadArtifact()
     const views: ViewDefinition[] = []
-    const disposers: (() => void)[] = []
+    const rootDisposers: Array<() => void | Promise<void>> = []
+    const uiDisposers: Array<() => void | Promise<void>> = []
+    const injectedServices: readonly string[][] = []
     const forkRequests: { readonly sessionId: string; readonly increaseTitle: boolean }[] = []
-    const ctx: FakeContext = {
+    const digestRequests: { readonly request: unknown; readonly signal: AbortSignal }[] = []
+    const disposeRemote = vi.fn(async () => {})
+    const mountRemote = vi.fn(async () => disposeRemote)
+    const digestRemote = {
+      generate: async (request: unknown, signal: AbortSignal) => {
+        digestRequests.push({ request, signal })
+        return { ok: true, value: { kind: 'empty' } }
+      },
+    }
+    let ctx: FakeContext
+    ctx = {
+      inject: (services, apply) => {
+        injectedServices.push(services)
+        const injectedCtx: FakeContext = {
+          ...ctx,
+          effect: (install) => {
+            const disposer = install()
+            if (typeof disposer === 'function') uiDisposers.push(disposer as () => void | Promise<void>)
+          },
+          remote: { $mount: mountRemote, sessionGraphDigest: digestRemote },
+        }
+        apply(injectedCtx)
+        const fiber = Promise.resolve() as Promise<void> & { dispose: () => Promise<void> }
+        fiber.dispose = async () => {
+          for (const dispose of uiDisposers.reverse()) await dispose()
+        }
+        return fiber
+      },
       effect: (install) => {
         const disposer = install()
-        if (typeof disposer === 'function') disposers.push(disposer as () => void)
+        if (typeof disposer === 'function') rootDisposers.push(disposer as () => void | Promise<void>)
       },
       locale: {
         register: () => () => {},
@@ -96,7 +140,7 @@ describe('tsdown client artifact', () => {
         inject: (name, install) => {
           expect(name).toBe('conversation.view')
           const disposer = install()
-          if (typeof disposer === 'function') disposers.push(disposer as () => void)
+          if (typeof disposer === 'function') uiDisposers.push(disposer as () => void | Promise<void>)
         },
         register: (definition) => {
           views.push(definition)
@@ -110,16 +154,37 @@ describe('tsdown client artifact', () => {
           return 'child'
         },
       },
+      remote: {
+        $mount: mountRemote,
+        get sessionGraphDigest() {
+          throw new Error('cannot get property "remote.sessionGraphDigest" without inject')
+        },
+      },
     }
 
-    plugin.apply(ctx)
+    const disposePlugin = await plugin.apply(ctx)
+    expect(mountRemote).toHaveBeenCalledOnce()
+    expect(injectedServices).toEqual([[
+      'slots', 'sessions', 'locale', 'remote.sessionGraphDigest',
+    ]])
     expect(views).toHaveLength(1)
     expect(views[0]).toMatchObject({ name: 'conversation.view', id: 'graph' })
     expect(views[0]?.label()).toBe('Graph')
     await views[0]?.inject().branchSession('source')
     expect(forkRequests).toEqual([{ sessionId: 'source', increaseTitle: true }])
-    for (const dispose of disposers.reverse()) dispose()
+    const controller = new AbortController()
+    await expect(views[0]?.inject().generateSessionDigest(
+      'source', { refresh: true }, controller.signal,
+    )).resolves.toEqual({ kind: 'empty' })
+    expect(digestRequests).toEqual([{
+      request: { sessionId: 'source', refresh: true },
+      signal: controller.signal,
+    }])
+    expect(disposePlugin).toBeTypeOf('function')
+    await disposePlugin?.()
+    for (const dispose of rootDisposers.reverse()) await dispose()
     expect(views).toHaveLength(0)
+    expect(disposeRemote).toHaveBeenCalledOnce()
   })
 
   it('injects package-tagged CSS when the factory materializes', async () => {

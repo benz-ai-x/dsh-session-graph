@@ -13,6 +13,7 @@ import {
   useCallback, useEffect, useMemo, useRef, useState, type ReactElement,
 } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionDigest } from '../session-digest.ts'
 import {
   applyCollapse, applyOffsets, CLUSTER_COLORS, clusterFrames, contentBounds,
 } from './clusters.ts'
@@ -60,7 +61,7 @@ const PREVIEW_H = 112
 /** Screen inset occupied by the filter and canvas controls. */
 const PREVIEW_TOP_INSET = 56
 /** Right-side canvas inset occupied by the Selected Session inspector. */
-const INSPECTOR_RIGHT_INSET = 304
+const INSPECTOR_RIGHT_INSET = 444
 
 /** Restore one record key to its pre-gesture value, removing a previously absent key. */
 function restoreEntry<T>(
@@ -193,16 +194,319 @@ function NodeCard({
 }
 
 /** The Selected Session summary and its explicit navigation/Branch actions. */
-function SelectedSessionPanel({ node, branchedFrom, now, t, onOpen, onBranch, onClose }: {
+interface ReadyDigestEntry {
+  readonly digest: SessionDigest
+  readonly sourceUpdatedAt: number
+}
+
+interface DigestScrollDrag {
+  readonly pointerId: number
+  readonly startY: number
+  readonly startScrollTop: number
+  moved: boolean
+}
+
+type DigestEntry =
+  | { readonly phase: 'generating'; readonly requestId: number; readonly previous?: ReadyDigestEntry }
+  | { readonly phase: 'ready'; readonly value: ReadyDigestEntry }
+  | { readonly phase: 'empty'; readonly sourceUpdatedAt: number }
+  | {
+    readonly phase: 'error'
+    readonly code?: string
+    readonly message?: string
+    readonly previous?: ReadyDigestEntry
+  }
+
+function priorReady(entry: DigestEntry | undefined): ReadyDigestEntry | undefined {
+  if (entry?.phase === 'ready') return entry.value
+  if (entry?.phase === 'generating' || entry?.phase === 'error') return entry.previous
+  return undefined
+}
+
+function safeDigestFailure(error: unknown): { readonly code?: string; readonly message?: string } {
+  if (!(error instanceof Error)) return {}
+  const code = typeof (error as Error & { code?: unknown }).code === 'string'
+    ? (error as Error & { code: string }).code
+    : undefined
+  const message = code === 'model-route-unavailable' || code === 'invalid-model-output'
+    ? error.message
+    : undefined
+  return {
+    ...(code === undefined ? {} : { code }),
+    ...(message === undefined ? {} : { message }),
+  }
+}
+
+function digestErrorLabel(code: string | undefined, t: Translate): string {
+  if (code === 'model-route-unavailable') return t('digest.errorRoute')
+  if (code === 'invalid-model-output') return t('digest.errorOutput')
+  return t('digest.error')
+}
+
+/** The structured, explicitly generated digest inside the Selected Session inspector. */
+function DigestSection({
+  node, entry, now, t, onGenerate,
+}: {
+  node: GraphNode
+  entry: DigestEntry | undefined
+  now: number
+  t: Translate
+  onGenerate: (refresh: boolean) => void
+}): ReactElement {
+  const scrollDragRef = useRef<DigestScrollDrag | null>(null)
+  const ready = priorReady(entry)
+  const emptyStale = entry?.phase === 'empty' && node.updatedAt > entry.sourceUpdatedAt
+  const stale = (ready !== undefined && node.updatedAt > ready.sourceUpdatedAt) || emptyStale
+  const renderReady = ready === undefined
+    ? null
+    : (
+      <div
+        className={styles.digestBody}
+        data-testid="session-digest-scroll"
+        onPointerDown={(event) => {
+          if (event.button !== 0
+            || event.currentTarget.scrollHeight <= event.currentTarget.clientHeight) return
+          event.stopPropagation()
+          event.preventDefault()
+          scrollDragRef.current = {
+            pointerId: event.pointerId,
+            startY: event.clientY,
+            startScrollTop: event.currentTarget.scrollTop,
+            moved: false,
+          }
+          if (typeof event.currentTarget.setPointerCapture === 'function') {
+            event.currentTarget.setPointerCapture(event.pointerId)
+          }
+        }}
+        onPointerMove={(event) => {
+          const drag = scrollDragRef.current
+          if (drag === null || drag.pointerId !== event.pointerId) return
+          event.stopPropagation()
+          const delta = drag.startY - event.clientY
+          if (!drag.moved && Math.abs(delta) < DRAG_THRESHOLD) return
+          drag.moved = true
+          event.preventDefault()
+          event.currentTarget.dataset.dragging = 'true'
+          event.currentTarget.scrollTop = drag.startScrollTop + delta
+        }}
+        onPointerUp={(event) => {
+          const drag = scrollDragRef.current
+          if (drag === null || drag.pointerId !== event.pointerId) return
+          event.stopPropagation()
+          scrollDragRef.current = null
+          delete event.currentTarget.dataset.dragging
+          if (typeof event.currentTarget.releasePointerCapture === 'function'
+            && (typeof event.currentTarget.hasPointerCapture !== 'function'
+              || event.currentTarget.hasPointerCapture(event.pointerId))) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+          }
+        }}
+        onPointerCancel={(event) => {
+          if (scrollDragRef.current?.pointerId !== event.pointerId) return
+          event.stopPropagation()
+          scrollDragRef.current = null
+          delete event.currentTarget.dataset.dragging
+        }}
+        onLostPointerCapture={(event) => {
+          if (scrollDragRef.current?.pointerId !== event.pointerId) return
+          scrollDragRef.current = null
+          delete event.currentTarget.dataset.dragging
+        }}
+      >
+        <p className={styles.digestOverview}>{ready.digest.overview}</p>
+        {ready.digest.keyOutcomes.length === 0
+          ? null
+          : (
+            <div className={styles.digestGroup}>
+              <div className={styles.digestGroupTitle}>{t('digest.outcomes')}</div>
+              <ul>{ready.digest.keyOutcomes.map((item, index) => <li key={`${String(index)}:${item}`}>{item}</li>)}</ul>
+            </div>
+          )}
+        {ready.digest.openItems.length === 0
+          ? null
+          : (
+            <div className={styles.digestGroup}>
+              <div className={styles.digestGroupTitle}>{t('digest.openItems')}</div>
+              <ul>{ready.digest.openItems.map((item, index) => <li key={`${String(index)}:${item}`}>{item}</li>)}</ul>
+            </div>
+          )}
+        <div className={styles.digestMeta}>
+          <span>{t('digest.turns', { count: ready.digest.sourceTurnCount })}</span>
+          <span>·</span>
+          <span>{timeLabel(ready.digest.generatedAt, now, t)}</span>
+        </div>
+      </div>
+    )
+
+  return (
+    <section
+      className={styles.digestSection}
+      aria-label={t('digest.title')}
+      data-testid="session-digest-section"
+    >
+      <div className={styles.digestHeader}>
+        <h3 className={styles.digestTitle}>{t('digest.title')}</h3>
+        <div className={styles.digestBadges}>
+          {ready?.digest.generatedWhileRunning === true
+            ? <span className={styles.digestSnapshot}>{t('digest.snapshot')}</span>
+            : null}
+          {stale ? <span className={styles.digestStale}>{t('digest.stale')}</span> : null}
+        </div>
+      </div>
+      {entry === undefined && !node.blank
+        ? (
+          <div className={styles.digestEmptyState}>
+            <p>{t('digest.intro')}</p>
+            <button type="button" className={styles.digestAction} onClick={() => { onGenerate(false) }}>
+              {t('digest.generate')}
+            </button>
+          </div>
+        )
+        : null}
+      {node.blank || entry?.phase === 'empty'
+        ? <p className={styles.digestQuiet}>{t('digest.empty')}</p>
+        : null}
+      {emptyStale
+        ? (
+          <button type="button" className={styles.digestAction} onClick={() => { onGenerate(false) }}>
+            {t('digest.generate')}
+          </button>
+        )
+        : null}
+      {entry?.phase === 'generating'
+        ? (
+          <div className={styles.digestGenerating} role="status" aria-live="polite">
+            <span className={styles.digestSpinner} aria-hidden="true" />
+            <span>{ready === undefined ? t('digest.generating') : t('digest.refreshing')}</span>
+          </div>
+        )
+        : null}
+      {renderReady}
+      {entry?.phase === 'ready'
+        ? (
+          <button type="button" className={styles.digestAction} onClick={() => { onGenerate(true) }}>
+            {stale ? t('digest.refresh') : t('digest.regenerate')}
+          </button>
+        )
+        : null}
+      {entry?.phase === 'error'
+        ? (
+          <div
+            className={styles.digestFailure}
+            role="alert"
+            data-error-code={entry.code}
+            title={entry.message}
+          >
+            <span>{digestErrorLabel(entry.code, t)}</span>
+            <button type="button" className={styles.digestAction} onClick={() => { onGenerate(ready !== undefined) }}>
+              {t('digest.retry')}
+            </button>
+          </div>
+        )
+        : null}
+    </section>
+  )
+}
+
+function SelectedSessionPanel({
+  node, branchedFrom, now, t, onOpen, onBranch, onGenerateDigest, onClose,
+}: {
   node: GraphNode | undefined
   branchedFrom: string | undefined
   now: number
   t: Translate
   onOpen: GraphViewInjected['openSession']
   onBranch: GraphViewInjected['branchSession']
+  onGenerateDigest: GraphViewInjected['generateSessionDigest']
   onClose: () => void
 }): ReactElement | null {
   const [branchErrorFor, setBranchErrorFor] = useState<SessionId | null>(null)
+  const [digestBySession, setDigestBySession] = useState<Record<string, DigestEntry>>({})
+  const activeDigestRequests = useRef(new Map<string, {
+    readonly requestId: number
+    readonly controller: AbortController
+  }>())
+  const nextDigestRequestId = useRef(0)
+  const previousSelectedId = useRef<SessionId | undefined>(undefined)
+
+  useEffect(() => {
+    const previous = previousSelectedId.current
+    const current = node?.id
+    previousSelectedId.current = current
+    if (previous === undefined || previous === current) return
+    const active = activeDigestRequests.current.get(previous)
+    if (active === undefined) return
+    active.controller.abort()
+    activeDigestRequests.current.delete(previous)
+    setDigestBySession(entries => {
+      const entry = entries[previous]
+      if (entry?.phase !== 'generating' || entry.requestId !== active.requestId) return entries
+      const next = { ...entries }
+      if (entry.previous === undefined) delete next[previous]
+      else next[previous] = { phase: 'ready', value: entry.previous }
+      return next
+    })
+  }, [node?.id])
+
+  useEffect(() => () => {
+    for (const active of activeDigestRequests.current.values()) active.controller.abort()
+    activeDigestRequests.current.clear()
+  }, [])
+
+  const generateDigest = useCallback((refresh: boolean): void => {
+    if (node === undefined || node.blank) return
+    const sessionId = node.id
+    const existing = activeDigestRequests.current.get(sessionId)
+    existing?.controller.abort()
+    const requestId = nextDigestRequestId.current + 1
+    nextDigestRequestId.current = requestId
+    const controller = new AbortController()
+    activeDigestRequests.current.set(sessionId, { requestId, controller })
+    let previous: ReadyDigestEntry | undefined
+    setDigestBySession(entries => {
+      previous = priorReady(entries[sessionId])
+      return {
+        ...entries,
+        [sessionId]: {
+          phase: 'generating',
+          requestId,
+          ...(previous === undefined ? {} : { previous }),
+        },
+      }
+    })
+    void onGenerateDigest(sessionId, { refresh }, controller.signal)
+      .then(result => {
+        if (activeDigestRequests.current.get(sessionId)?.requestId !== requestId) return
+        setDigestBySession(entries => ({
+          ...entries,
+          [sessionId]: result.kind === 'empty'
+            ? { phase: 'empty', sourceUpdatedAt: node.updatedAt }
+            : {
+              phase: 'ready',
+              value: { digest: result.digest, sourceUpdatedAt: node.updatedAt },
+            },
+        }))
+      })
+      .catch(error => {
+        if (controller.signal.aborted
+          || activeDigestRequests.current.get(sessionId)?.requestId !== requestId) return
+        const failure = safeDigestFailure(error)
+        setDigestBySession(entries => ({
+          ...entries,
+          [sessionId]: {
+            phase: 'error',
+            ...failure,
+            ...(previous === undefined ? {} : { previous }),
+          },
+        }))
+      })
+      .finally(() => {
+        if (activeDigestRequests.current.get(sessionId)?.requestId === requestId) {
+          activeDigestRequests.current.delete(sessionId)
+        }
+      })
+  }, [node, onGenerateDigest])
+
   if (node === undefined) return null
   const status = displayStatusLabel(node.displayStatus, t)
   return (
@@ -210,6 +514,7 @@ function SelectedSessionPanel({ node, branchedFrom, now, t, onOpen, onBranch, on
       className={styles.panel}
       role="complementary"
       aria-label={t('panel.title')}
+      data-canvas-overlay=""
       data-testid="session-graph-panel"
     >
       <div className={styles.panelHeader}>
@@ -236,6 +541,13 @@ function SelectedSessionPanel({ node, branchedFrom, now, t, onOpen, onBranch, on
       {branchedFrom === undefined
         ? null
         : <div className={styles.panelRelation}>{t('node.branchedFrom', { name: branchedFrom })}</div>}
+      <DigestSection
+        node={node}
+        entry={digestBySession[node.id]}
+        now={now}
+        t={t}
+        onGenerate={generateDigest}
+      />
       <div className={styles.panelActions}>
         <button
           type="button"
@@ -382,7 +694,7 @@ const CARD_H_MAP = 4
  * @returns the canvas element.
  */
 export function GraphCanvas({
-  laid, clusters, arrangement, now, t, onOpen, onBranch,
+  laid, clusters, arrangement, now, t, onOpen, onBranch, onGenerateDigest,
 }: {
   laid: LaidOutGraph
   clusters: readonly ClusterInfo[]
@@ -391,6 +703,7 @@ export function GraphCanvas({
   t: Translate
   onOpen: GraphViewInjected['openSession']
   onBranch: GraphViewInjected['branchSession']
+  onGenerateDigest: GraphViewInjected['generateSessionDigest']
 }): ReactElement {
   const surfaceRef = useRef<HTMLDivElement | null>(null)
   const [viewport, setViewport] = useState(initialViewport)
@@ -752,6 +1065,8 @@ export function GraphCanvas({
     const surface = surfaceRef.current
     if (surface === null) return
     const onWheel = (event: WheelEvent): void => {
+      if (event.target instanceof Element
+        && event.target.closest('[data-canvas-overlay]') !== null) return
       event.preventDefault()
       const rect = surface.getBoundingClientRect()
       setViewport(current => zoomAt(
@@ -770,7 +1085,7 @@ export function GraphCanvas({
     // own pointer gestures; the background pans and takes focus so the zoom
     // keys keep working. The guard must name every draggable: whoever does
     // not match gets its pointer capture stolen by the surface.
-    if ((event.target as HTMLElement).closest('[data-node-id], [data-cluster-title], input, button, select, textarea, svg') !== null) return
+    if ((event.target as HTMLElement).closest('[data-canvas-overlay], [data-node-id], [data-cluster-title], input, button, select, textarea, svg') !== null) return
     hidePreview()
     setSelected(null)
     dragRef.current = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY }
@@ -1213,6 +1528,7 @@ export function GraphCanvas({
         t={t}
         onOpen={onOpen}
         onBranch={onBranch}
+        onGenerateDigest={onGenerateDigest}
         onClose={() => { setSelected(null) }}
       />
       {showMinimap
