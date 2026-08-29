@@ -107,7 +107,7 @@ pnpm pack
 
 [Publish workflow](.github/workflows/publish.yml) 接受已发布的 GitHub Release 或手工提供的现有 tag。它要求 tag 等于 `v` 加包版本，重新运行 `pnpm run check`，打包归档，并把这些已验证字节发布到 npm；稳定版使用 npm tag `latest`，预发布版使用 `next`。
 
-发布前配置 GitHub environment `npm-publish`。如果 npm 上尚不存在本包，先添加权限范围尽量小的仓库 secret `NPM_TOKEN` 完成首次发布。随后配置 [npm trusted publisher](https://docs.npmjs.com/trusted-publishers/)：organization 为 `benz-ai-x`、repository 为 `dsh-session-graph`、workflow 为 `publish.yml`、environment 为 `npm-publish`，允许 `npm publish` action；trusted publishing 验证成功后移除长期凭据。
+本包使用 [npm trusted publisher](https://docs.npmjs.com/trusted-publishers/)：organization 为 `benz-ai-x`、repository 为 `dsh-session-graph`、workflow 为 `publish.yml`、environment 为 `npm-publish`，仅允许 `npm publish` action。工作流通过 GitHub OIDC 认证，不应再接收长期 `NPM_TOKEN`；保留 GitHub environment 作为发布边界。若为其他包名或 scope 做首次发布，只在首次引导时使用权限范围尽量小、有效期尽量短的令牌，随后立即配置 trusted publishing 并吊销该令牌。
 
 每次发布 GitHub Release 前都必须先更新 `package.json`，构建并确认 Graph 页头徽标显示相同版本，再合入变更、创建匹配且不可移动的 `v<version>` tag，最后发布 Release。若要发布 `v0.1.1` 这类现有 tag，请手工运行 Publish workflow 并传入该 tag。
 
