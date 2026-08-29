@@ -65,4 +65,4 @@ jobs:
           package_version=$(node -p 'require("./package.json").version')
           package_archive=".artifacts/benz-ai-x-dsh-client-ui-session-graph-$package_version.tgz"
           publish_tag=$(node -p 'require("./package.json").version.includes("-") ? "next" : "latest"')
-          npm publish "$package_archive" --access public --provenance --tag "$publish_tag"
+          npm publish "$package_archive" --access public --provenance --tag "$publish_tag" --loglevel verbose
