@@ -1,5 +1,5 @@
 ---
-description: "Installable dsh Web plugin for browsing, arranging, branching, and digesting related workspace sessions on a free canvas."
+description: "Installable dsh Web plugin for browsing, arranging, branching, merging, and digesting related workspace sessions on a free canvas."
 kind: "package-bundle"
 ---
 
@@ -7,7 +7,7 @@ kind: "package-bundle"
 
 English | [中文](README.zh.md)
 
-This package adds a **Graph** tab to the DeepSeek Harness conversation view. It groups Branch-connected Canvas Sessions into movable, collapsible Session Clusters, draws Branch relations as directed edges, and folds Subagent Sessions into Subagent Summaries. The browser stores each Session Arrangement by graph scope. Graph projection never changes a session log; **New branch** delegates session creation to Harness, while **Generate digest** makes a separate, explicit, read-only model request whose output is never appended to the session.
+This package adds a **Graph** tab to the DeepSeek Harness conversation view. It groups Branch-connected Canvas Sessions into movable, collapsible Session Clusters, draws Branch and Merge relations as directed edges, and folds Subagent Sessions into Subagent Summaries. The browser stores each Session Arrangement by graph scope. Browsing, arranging, and digesting never change a Session log; **New branch** and **Merge sessions** are explicit Harness-owned creation workflows.
 
 ## Install
 
@@ -20,7 +20,7 @@ dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
 To install the tagged source directly from GitHub:
 
 ```sh
-dsh plugin --profile web add github:benz-ai-x/dsh-session-graph#v0.1.1
+dsh plugin --profile web add github:benz-ai-x/dsh-session-graph#v0.1.2
 ```
 
 pnpm blocks a git dependency's `prepare` script until the profile explicitly permits it. The first GitHub install exits with `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`; copy the exact key printed by dsh into `$DSH_HOME/profiles/web/pnpm-workspace.yaml` under `allowBuilds`, then rerun the command. This permission executes package code outside the agent sandbox, so inspect the source and pin a tag or commit.
@@ -45,13 +45,27 @@ Open a non-blank session and choose **Graph** beside the standard conversation t
 - A double click opens the session in its last-used view.
 - Dwell on another Canvas Session for a compact preview without replacing the Selected Session inspector.
 - Drag nodes or complete cluster frames to arrange the canvas. Alignment guides snap nearby card edges.
-- Each Canvas Session exposes stable top input and bottom output terminals for later graph-editing features; Branches are solid directed edges and Subagent Derivations are dashed.
+- Each Canvas Session exposes stable top input and bottom output terminals for later graph-editing features. Branches are neutral solid directed edges, Merge Relations are branded solid directed edges, and Subagent Derivations are dashed.
 - Use wheel zoom, background-drag panning, fit, 100%, relayout, reset, Viewed Session location, or the minimap. The minimap appears only when content leaves the visible surface, and resizing preserves the current content center and scale.
 - Filter by title; Enter centers the first match and Escape clears the filter.
 - Hover a node or edge to emphasize its Branch Lineage.
 - Read the header badge to identify the package version and exact local Build ID; hover it for the full package identity.
 
 Keyboard shortcuts work while the canvas is focused: `+` and `-` zoom, `0` restores 100%, and `1` fits the graph.
+
+## Merge Sessions
+
+Choose **Merge sessions** in the canvas toolbar, then select two or three Canvas Sessions in the numbered order shown on their cards. Review or edit the Merge instruction and choose **Create Merge session**.
+
+- Sources must be distinct, non-blank, non-Subagent Canvas Sessions in the same Workspace or working directory.
+- Choose every source on the canvas. Merge instructions cannot contain `dsh-session:` references, because Harness reserves them for the exact source snapshot set.
+- Harness creates one independent target Session, gives it a source-derived title, and captures each source at an immutable event boundary. The sources and their existing Branch lineages remain unchanged.
+- The target's normal agent loop receives the edited instruction plus canonical Harness Session references. This feature does not choose a separate summary model; the target uses its normal configured model route when it processes the queued request.
+- A Merge Session remains its own Session Cluster. Branded Merge Relations show provenance from each source cluster without turning those sources into parents.
+- The Session Inspector lists the source titles and capture boundaries for a selected Merge Session. Merge provenance is projected from the target log and checkpointed in Harness's durable Projection Cache, so it survives restart and cold log replay.
+- If target creation succeeds but naming, snapshot submission, persistence, or opening fails, the target is preserved. **Try again** reuses that target instead of creating a duplicate; a late capture from the prior attempt is accepted only when its ordered source set matches exactly. **Open target session** remains available for recovery.
+
+Source selection can be cancelled before submission. Once submission starts, the controls stay locked until it succeeds or produces a recoverable error; leaving the view still aborts its browser request. Host capture waiting is also bounded, and a timeout is reported as a retryable snapshot-submission failure.
 
 ## Generate a Session Digest
 
@@ -87,7 +101,7 @@ pnpm install
 pnpm run check
 ```
 
-`pnpm run check` type-checks the standalone package, builds the Host and browser entries, and runs 94 package-owned tests. To run the 83 Host and full-interaction integration tests against a prepared DeepSeek Harness checkout:
+`pnpm run check` type-checks the standalone package, builds the Host and browser entries, and runs 142 package-owned tests. To run the 93 Host and full-interaction integration tests against a prepared DeepSeek Harness checkout:
 
 ```sh
 DSH_HARNESS_ROOT=/path/to/deepseek-harness pnpm test:harness
@@ -109,29 +123,32 @@ The [Publish workflow](.github/workflows/publish.yml) accepts a published GitHub
 
 The package uses an [npm trusted publisher](https://docs.npmjs.com/trusted-publishers/) for organization `benz-ai-x`, repository `dsh-session-graph`, workflow `publish.yml`, environment `npm-publish`, and the `npm publish` action. The workflow authenticates with GitHub OIDC and must not receive a long-lived `NPM_TOKEN`; keep the GitHub environment as the deployment boundary. When bootstrapping a different package or scope, use a narrowly scoped, short-lived token only for the first publication, configure trusted publishing immediately, and then revoke the token.
 
-Every GitHub Release must first update `package.json`. Build and verify that the Graph header badge shows the same version, merge the change, create the matching immutable `v<version>` tag, and then publish the Release. To publish an existing tag such as `v0.1.1`, run the Publish workflow manually and pass that tag.
+Every GitHub Release must first update `package.json`. Build and verify that the Graph header badge shows the same version, merge the change, create the matching immutable `v<version>` tag, and then publish the Release. To publish an existing tag such as `v0.1.2`, run the Publish workflow manually and pass that tag.
 
 The package exports two host entries and one lazy browser module:
 
 | Export | Purpose |
 |---|---|
-| `.` | Cordis Host service for explicit Session Digest generation |
+| `.` | Cordis Host services for Session Digest generation and durable Session Merge submission |
 | `./invariant` | Runtime registration invariant |
 | `./client` | Built dsh client module |
 | `./cordis.patch.yml` | Profile bundle patch |
 
 ## Implementation
 
-`GraphView` reads the Viewed Session, Workspace membership, session summaries, and pending-interaction map. Pure helpers derive Session Clusters, Branch edges, Subagent Summaries, layout, snapping, Title Filter matches, and viewport state before `GraphCanvas` renders the result. The Host service inspects an explicitly addressed Session, prepares a bounded safe source, calls the selected LLM route, validates structured output, and exposes it through a package-owned Remote without mutating persistence.
+`GraphView` reads the Viewed Session, Workspace membership, session summaries, and pending-interaction map. Pure helpers derive Session Clusters, Branch and Merge edges, Subagent Summaries, cross-cluster ordering, layout, snapping, Title Filter matches, and viewport state before `GraphCanvas` renders the result. The Host exposes separate package-owned Remotes for read-only Session Digests and atomic Session Merge capture. Merge submission queues an explicit marker and canonical references, waits for the matching projection, then writes the Projection Cache before reporting success.
 
 | File | Responsibility |
 |---|---|
 | [`src/client/GraphView.tsx`](src/client/GraphView.tsx) | Workspace/Directory Scope resolution, graph derivation, and view header |
 | [`src/client/GraphCanvas.tsx`](src/client/GraphCanvas.tsx) | Canvas rendering, ports, inspector, controls, gestures, hover state, and minimap |
-| [`src/index.ts`](src/index.ts) | Session Digest Host service, configuration, Harness LLM request, and Remote errors |
+| [`src/index.ts`](src/index.ts) | Session Digest and Session Merge Host services, projection registration, configuration, and Remote errors |
 | [`src/session-digest.ts`](src/session-digest.ts) and [`src/session-digest-harness.ts`](src/session-digest-harness.ts) | Event filtering, input budgeting, route reconstruction, output validation, revision cache, and concurrency control |
+| [`src/session-merge.ts`](src/session-merge.ts), [`src/session-merge-host.ts`](src/session-merge-host.ts), and [`src/session-merge-harness.ts`](src/session-merge-harness.ts) | Browser workflow, Host validation, canonical reference submission, bounded capture, idempotent retry, and durability barrier |
+| [`src/session-merge-projection.ts`](src/session-merge-projection.ts) | Versioned Merge marker/reference projection and strict persisted-state validation |
 | [`src/client/session-digest-remote.ts`](src/client/session-digest-remote.ts) | Strict browser Remote request/result contract |
-| [`src/client/graph-model.ts`](src/client/graph-model.ts) | Graph Scope resolution, Branch edges, Subagent Summaries, Title Filter matches, and Branch Lineages |
+| [`src/client/session-merge-remote.ts`](src/client/session-merge-remote.ts) | Strict browser Session Merge Remote request/result contract |
+| [`src/client/graph-model.ts`](src/client/graph-model.ts) | Graph Scope resolution, Branch and Merge edges, Session Cluster ordering, Subagent Summaries, Title Filter matches, and Branch Lineages |
 | [`src/client/layout.ts`](src/client/layout.ts) and [`src/client/clusters.ts`](src/client/clusters.ts) | Tree coordinates, frames, collapse, offsets, and edge paths |
 | [`src/client/viewport.ts`](src/client/viewport.ts), [`src/client/preview-placement.ts`](src/client/preview-placement.ts), and [`src/client/snap.ts`](src/client/snap.ts) | Zoom, pan, resize preservation, fit, minimap/preview placement, and alignment guides |
 | [`src/client/layout-store.ts`](src/client/layout-store.ts) | Per-scope Session Arrangement persistence, migration, and invalid-record recovery |
@@ -144,6 +161,8 @@ The package exports two host entries and one lazy browser module:
 - Session Digests are generated only on demand and cached in Host memory, not persisted as durable artifacts. A Host restart clears the cache.
 - A Session without a logged model route needs a configured fallback route before it can be digested.
 - A Branch created from a Subagent Session has no Canvas Session parent edge and appears as a Root Session.
+- One Merge accepts two or three sources, and all sources must resolve in the target's working directory. Cross-Workspace Merge is not supported.
+- Merge captures immutable source snapshots; later source messages do not automatically refresh an existing Merge Session.
 - Touch uses pointer-event fallbacks and has no dedicated controls.
 
 ## License

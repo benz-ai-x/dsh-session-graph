@@ -184,7 +184,9 @@ describe('deriveSessionGraph edges', () => {
       child: session('child', { parentId: id('root'), updatedAt: 400 }),
     })
     expect(graph.children.get('root')).toEqual(['child'])
-    expect(graph.edges).toContainEqual({ id: 'branch:root->child', from: 'root', to: 'child' })
+    expect(graph.edges).toContainEqual({
+      id: 'branch:root->child', kind: 'branch', from: 'root', to: 'child',
+    })
   })
 
   it('renders a Branch from a Subagent Session as a new Root Session without an edge', () => {
@@ -205,6 +207,38 @@ describe('deriveSessionGraph edges', () => {
     const scope = resolveGraphScope(id('inside'), list, workspacesState([workspace('w1', '/w', ['inside'])]))
     const graph = deriveSessionGraph(list, scope, undefined, new Map())
     expect(graph.clusters.map(cluster => cluster.rootId)).toEqual(['inside'])
+  })
+
+  it('derives Merge Relations without joining the independent Session Clusters', () => {
+    const graph = graphFor({
+      sourceA: session('sourceA', { updatedAt: 300 }),
+      sourceB: session('sourceB', { updatedAt: 200 }),
+      target: session('target', {
+        updatedAt: 900,
+        projectionValues: {
+          sessionGraphMerge: {
+            operationId: 'operation-1',
+            contextEventSeq: 8,
+            sources: [
+              { sessionId: 'sourceA', capturedThroughSeq: 3 },
+              { sessionId: 'sourceB', capturedThroughSeq: 4 },
+            ],
+          },
+        },
+      }),
+    })
+
+    expect(graph.clusters.map(cluster => cluster.rootId)).toEqual([
+      'sourceA', 'sourceB', 'target',
+    ])
+    expect(graph.nodes.get('target')?.mergeSources).toEqual([
+      { sessionId: 'sourceA', capturedThroughSeq: 3 },
+      { sessionId: 'sourceB', capturedThroughSeq: 4 },
+    ])
+    expect(graph.edges).toEqual([
+      { id: 'merge:sourceA->target', kind: 'merge', from: 'sourceA', to: 'target' },
+      { id: 'merge:sourceB->target', kind: 'merge', from: 'sourceB', to: 'target' },
+    ])
   })
 })
 

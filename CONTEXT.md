@@ -30,7 +30,7 @@ _Avoid_: Untitled Workspace, loose Workspace
 A Viewed Session for which neither a Workspace nor a working directory can be resolved, so no Session Graph can be formed.
 _Avoid_: Outside-Workspace Session
 
-### Sessions and lineage
+### Sessions and relationships
 
 **Session Graph**:
 The scope-bound projection of Canvas Sessions, Branches, Session Clusters, and Subagent Summaries. It is not a separately owned source of session data.
@@ -55,6 +55,22 @@ _Avoid_: Branch tree, derivation tree
 **Branch**:
 A directed lineage relation from one Canvas Session to a child Canvas Session. Creating a Branch produces a distinct session without changing the source session.
 _Avoid_: Fork, Subagent Derivation
+
+**Merge Session**:
+An independent Canvas Session initialized from an explicit instruction and immutable snapshots of two or three source sessions. It is not a Branch, and its creation does not change its sources.
+_Avoid_: Aggregated session, merged branch, combined thread
+
+**Merge Source**:
+A Canvas Session selected to contribute one snapshot to a Merge Session. All Merge Sources belong to the same Workspace or working directory.
+_Avoid_: Parent session, input branch
+
+**Session Snapshot**:
+An immutable view of one Merge Source through a recorded event boundary. Later source activity does not alter the snapshot already used by a Merge Session.
+_Avoid_: Live reference, copied session
+
+**Merge Relation**:
+A directed many-to-one relationship from each Merge Source to its Merge Session. It records provenance without creating Session Lineage or changing Session Cluster membership.
+_Avoid_: Branch, parent relation, Subagent Derivation
 
 **Subagent Derivation**:
 A directed lineage relation whose child is a Subagent Session. It is summarized under a Canvas Session rather than represented as a Branch.

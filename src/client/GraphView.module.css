@@ -73,6 +73,26 @@
   border-bottom: 3px solid transparent;
 }
 
+/* Merge is solid like Branch, but branded so the two relationship types
+   remain distinguishable without relying on line style alone. */
+.legendLineMerge {
+  display: inline-block;
+  width: 18px;
+  height: 2px;
+  background: var(--dsw-alias-state-business-primary);
+  position: relative;
+}
+
+.legendLineMerge::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  top: -2px;
+  border-left: 5px solid var(--dsw-alias-state-business-primary);
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+}
+
 .node:focus-visible {
   outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: 2px;
@@ -143,6 +163,11 @@
 .controls button:focus-visible {
   outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: 1px;
+}
+
+.controls .mergeToolbarAction {
+  color: var(--dsw-alias-state-business-primary);
+  font-weight: 600;
 }
 
 .controlDivider {
@@ -346,6 +371,18 @@
   fill: var(--dsw-alias-label-tertiary);
 }
 
+.edgeMerge {
+  fill: none;
+  stroke: var(--dsw-alias-state-business-primary);
+  stroke-width: 2;
+}
+
+.edgeMergeArrow {
+  stroke: var(--dsw-alias-state-business-primary);
+  stroke-width: 1.5;
+  fill: var(--dsw-alias-state-business-primary);
+}
+
 /* The invisible fat stroke that makes a thin Branch edge hoverable. */
 .edgeHit {
   fill: none;
@@ -358,12 +395,14 @@
   transition: opacity 160ms ease;
 }
 
-.edgeHot .edgeBranch {
+.edgeHot .edgeBranch,
+.edgeHot .edgeMerge {
   stroke: var(--dsw-alias-state-business-primary);
-  stroke-width: 2;
+  stroke-width: 2.5;
 }
 
-.edgeHot .edgeBranchArrow {
+.edgeHot .edgeBranchArrow,
+.edgeHot .edgeMergeArrow {
   stroke: var(--dsw-alias-state-business-primary);
   fill: var(--dsw-alias-state-business-primary);
 }
@@ -482,6 +521,28 @@
 .nodeSelected {
   /* React Flow discipline: the border stays neutral, selection is a ring. */
   box-shadow: 0 0 0 2px var(--dsw-alias-state-business-primary), var(--dsw-shadow-lv2);
+}
+
+.nodeMergeSelected {
+  border-color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-state-business-tertiary);
+  box-shadow: 0 0 0 2px var(--dsw-alias-state-business-primary), var(--dsw-shadow-lv2);
+}
+
+.mergeSelectionOrder {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--dsw-alias-bg-layer-3);
+  border-radius: 50%;
+  color: var(--dsw-alias-label-primary-foreground);
+  background: var(--dsw-alias-state-business-primary);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .nodePending {
@@ -626,6 +687,205 @@
   line-height: 18px;
   color: var(--dsw-alias-label-secondary);
   overflow-wrap: anywhere;
+}
+
+.mergeRelations {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.mergeRelationsTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mergeRelations ol {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mergeRelations li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 1px 8px;
+  font-size: 12px;
+}
+
+.mergeRelationSource {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-primary);
+}
+
+.mergeRelationSnapshot {
+  grid-column: 2;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.mergePanel {
+  gap: 10px;
+}
+
+.mergeIntro {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mergeCount {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.mergeProgress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  font-size: 12px;
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.mergeFailure {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-module-platform);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.mergeFailure span:last-child:not(:first-child) {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mergeOpenTarget {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-module-platform);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mergeOpenTarget:hover {
+  border-color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mergeSourceList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mergeSourceList li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 6px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-module-platform);
+  font-size: 12px;
+}
+
+.mergeSourceList li > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mergeSourceOrder {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: var(--dsw-alias-label-primary-foreground);
+  background: var(--dsw-alias-state-business-primary);
+  font-size: 11px;
+}
+
+.mergeSourceList button {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  color: var(--dsw-alias-label-secondary);
+  background: none;
+  cursor: pointer;
+}
+
+.mergeSourceList button:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mergeInstructionLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.mergeInstructionLabel textarea {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  outline: none;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-1);
+  font: inherit;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.mergeInstructionLabel textarea:focus {
+  border-color: var(--dsw-alias-state-business-primary);
+  box-shadow: 0 0 0 1px var(--dsw-alias-state-business-primary);
+}
+
+.mergeInstructionError {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 16px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.panelActions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .digestSection {

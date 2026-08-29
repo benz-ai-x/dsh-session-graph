@@ -10,6 +10,7 @@
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceSnapshot } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionMergeProjectionSource } from '../session-merge-projection.ts'
 import type { SessionArrangementIdentity } from './layout-store.ts'
 
 /**
@@ -34,6 +35,7 @@ interface GraphScopeBase {
 export interface WorkspaceGraphScope extends GraphScopeBase {
   readonly kind: 'workspace'
   readonly label: string
+  readonly workspaceId: string
 }
 
 /** An unnamed graph scope resolved only from the Viewed Session's directory. */
@@ -60,14 +62,17 @@ export interface GraphNode {
   readonly runningSubagents: number
   /** The parent Canvas Session id for an attached Branch. */
   readonly branchFrom: SessionId | undefined
+  /** Captured source snapshots when this node is an explicit Merge Session. */
+  readonly mergeSources: readonly SessionMergeProjectionSource[]
 }
 
 /** The one activity label presented when source activity facts overlap. */
 export type DisplayStatus = 'running' | 'waiting-input' | 'completed'
 
-/** One Branch edge between two Canvas Sessions. */
+/** One typed relationship between two Canvas Sessions. */
 export interface GraphEdge {
   readonly id: string
+  readonly kind: 'branch' | 'merge'
   readonly from: string
   readonly to: string
 }
@@ -142,6 +147,7 @@ export function resolveGraphScope(
   return {
     kind: 'workspace',
     label: workspace.title,
+    workspaceId: workspace.workspaceId,
     path,
     arrangement: { key: `workspace:${workspace.workspaceId}`, legacyKey: path },
     members,
@@ -263,12 +269,18 @@ export function deriveSessionGraph(
       branchFrom: row.parentId !== undefined && visible.get(row.parentId)?.origin !== 'subagent'
         ? row.parentId
         : undefined,
+      mergeSources: row.projectionValues?.sessionGraphMerge?.sources ?? [],
     })
     members.push(row.id)
     const childKeys: string[] = []
     for (const child of branchChildrenOf(row)) {
       childKeys.push(child.id)
-      edges.push({ id: `branch:${row.id}->${child.id}`, from: row.id, to: child.id })
+      edges.push({
+        id: `branch:${row.id}->${child.id}`,
+        kind: 'branch',
+        from: row.id,
+        to: child.id,
+      })
     }
     if (childKeys.length > 0) children.set(row.id, childKeys)
     for (const child of branchChildrenOf(row)) placeMember(child, clusterRootId, members)
@@ -283,13 +295,71 @@ export function deriveSessionGraph(
     clusters.push({ rootId: root.id, label: root.displayTitle, memberIds: members })
   }
 
+  for (const target of nodes.values()) {
+    for (const source of target.mergeSources) {
+      if (!nodes.has(source.sessionId)) continue
+      edges.push({
+        id: `merge:${source.sessionId}->${target.id}`,
+        kind: 'merge',
+        from: source.sessionId,
+        to: target.id,
+      })
+    }
+  }
+
+  const orderedClusters = orderClustersByMerge(clusters, nodes, edges)
+
   return {
-    clusters,
+    clusters: orderedClusters,
     nodes,
     children,
     edges,
     sessionCount: nodes.size,
   }
+}
+
+/** Stable topological order: source clusters precede their Merge targets. */
+function orderClustersByMerge(
+  clusters: readonly ClusterInfo[],
+  nodes: ReadonlyMap<string, GraphNode>,
+  edges: readonly GraphEdge[],
+): readonly ClusterInfo[] {
+  const index = new Map(clusters.map((cluster, position) => [cluster.rootId, position]))
+  const byId = new Map(clusters.map(cluster => [cluster.rootId, cluster]))
+  const outgoing = new Map<SessionId, Set<SessionId>>()
+  const indegree = new Map(clusters.map(cluster => [cluster.rootId, 0]))
+  for (const edge of edges) {
+    if (edge.kind !== 'merge') continue
+    const from = nodes.get(edge.from)?.clusterId
+    const to = nodes.get(edge.to)?.clusterId
+    if (from === undefined || to === undefined || from === to) continue
+    const targets = outgoing.get(from) ?? new Set<SessionId>()
+    if (targets.has(to)) continue
+    targets.add(to)
+    outgoing.set(from, targets)
+    indegree.set(to, (indegree.get(to) ?? 0) + 1)
+  }
+  const ready = clusters
+    .filter(cluster => indegree.get(cluster.rootId) === 0)
+    .map(cluster => cluster.rootId)
+  const ordered: ClusterInfo[] = []
+  while (ready.length > 0) {
+    const next = ready.shift()
+    /* v8 ignore next -- ready is non-empty */
+    if (next === undefined) break
+    const cluster = byId.get(next)
+    /* v8 ignore next -- ready ids come from clusters */
+    if (cluster === undefined) continue
+    ordered.push(cluster)
+    for (const target of outgoing.get(next) ?? []) {
+      const remaining = (indegree.get(target) ?? 0) - 1
+      indegree.set(target, remaining)
+      if (remaining !== 0) continue
+      ready.push(target)
+      ready.sort((left, right) => (index.get(left) ?? 0) - (index.get(right) ?? 0))
+    }
+  }
+  return ordered.length === clusters.length ? ordered : clusters
 }
 
 /**

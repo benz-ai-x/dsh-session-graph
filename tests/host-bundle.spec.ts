@@ -7,6 +7,7 @@ describe('Host bundle', () => {
 
     expect(code).not.toContain('@Remote')
     expect(code).toContain('Remote("generate")')
+    expect(code).toContain('Remote("submit")')
     expect(code).toContain('from "@deepseek-ai/dsh-llm"')
     expect(code).toContain('from "@deepseek-ai/dsh-typert-protocol"')
   })

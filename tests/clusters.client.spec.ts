@@ -146,6 +146,32 @@ describe('applyCollapse', () => {
     expect(applyCollapse(laid, clusters, new Set(['root'])).edges).toHaveLength(0)
   })
 
+  it('preserves cross-cluster Merge edges when their source cluster collapses', () => {
+    const { laid, clusters } = graphFor({
+      source: session('source', { updatedAt: 500 }),
+      branch: session('branch', { parentId: id('source'), updatedAt: 400 }),
+      other: session('other', { updatedAt: 300 }),
+      target: session('target', {
+        updatedAt: 900,
+        projectionValues: {
+          sessionGraphMerge: {
+            operationId: 'operation-1',
+            contextEventSeq: 8,
+            sources: [
+              { sessionId: 'source', capturedThroughSeq: 3 },
+              { sessionId: 'other', capturedThroughSeq: 4 },
+            ],
+          },
+        },
+      }),
+    })
+
+    const collapsed = applyCollapse(laid, clusters, new Set(['source']))
+
+    expect(collapsed.edges.some(entry => entry.edge.id === 'branch:source->branch')).toBe(false)
+    expect(collapsed.edges.some(entry => entry.edge.id === 'merge:source->target')).toBe(true)
+  })
+
   it('returns the input graph when nothing is collapsed', () => {
     const { laid, clusters } = graphFor(CLUSTERED)
     expect(applyCollapse(laid, clusters, new Set())).toBe(laid)
@@ -192,6 +218,31 @@ describe('applyOffsets', () => {
     expect(applyOffsets(laid, {})).toBe(laid)
     expect(applyOffsets(laid, { root: { dx: 0, dy: 0 } })).toBe(laid)
     expect(applyOffsets(laid, { ghost: { dx: 10, dy: 10 } })).toBe(laid)
+  })
+
+  it('redraws a cross-cluster Merge edge when only its target cluster moves', () => {
+    const { laid } = graphFor({
+      source: session('source', { updatedAt: 200 }),
+      target: session('target', {
+        updatedAt: 900,
+        projectionValues: {
+          sessionGraphMerge: {
+            operationId: 'operation-1',
+            contextEventSeq: 8,
+            sources: [{ sessionId: 'source', capturedThroughSeq: 3 }, {
+              sessionId: 'other', capturedThroughSeq: 4,
+            }],
+          },
+        },
+      }),
+      other: session('other', { updatedAt: 100 }),
+    })
+    const before = laid.edges.find(entry => entry.edge.id === 'merge:source->target')
+
+    const moved = applyOffsets(laid, { target: { dx: 80, dy: 40 } })
+    const after = moved.edges.find(entry => entry.edge.id === 'merge:source->target')
+
+    expect(after?.path).not.toBe(before?.path)
   })
 
   it('passes edges through untouched when their cluster is not offset or an endpoint is missing', () => {

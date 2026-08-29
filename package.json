@@ -1,7 +1,7 @@
 {
   "name": "@benz-ai-x/dsh-client-ui-session-graph",
-  "description": "Installable DeepSeek Harness Web plugin for browsing and arranging related workspace sessions on a free canvas",
-  "version": "0.1.1",
+  "description": "DeepSeek Harness Web plugin for browsing, arranging, branching, merging, and digesting related sessions on a free canvas",
+  "version": "0.1.2",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

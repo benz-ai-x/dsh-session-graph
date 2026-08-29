@@ -14,6 +14,7 @@ import {
 } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SessionDigest } from '../session-digest.ts'
+import { containsSessionReferenceUri } from '../session-merge.ts'
 import {
   applyCollapse, applyOffsets, CLUSTER_COLORS, clusterFrames, contentBounds,
 } from './clusters.ts'
@@ -41,6 +42,47 @@ const DRAG_THRESHOLD = 3
 
 /** Translation seat over the sessionGraph namespace. */
 type Translate = (key: SessionGraphKey, params?: Record<string, unknown>) => string
+
+interface MergeFailure {
+  readonly code: string | undefined
+  readonly stage: string | undefined
+  readonly message: string
+  readonly targetSessionId: SessionId | undefined
+}
+
+type MergeRunState =
+  | { readonly phase: 'idle' }
+  | { readonly phase: 'submitting' }
+  | { readonly phase: 'error'; readonly failure: MergeFailure }
+
+/** Preserve only the stable, user-actionable fields exposed by SessionMergeError. */
+function mergeFailureOf(error: unknown): MergeFailure {
+  if (!(error instanceof Error)) {
+    return { code: undefined, stage: undefined, message: String(error), targetSessionId: undefined }
+  }
+  const details = error as Error & {
+    readonly code?: unknown
+    readonly stage?: unknown
+    readonly targetSessionId?: unknown
+  }
+  return {
+    code: typeof details.code === 'string' ? details.code : undefined,
+    stage: typeof details.stage === 'string' ? details.stage : undefined,
+    message: error.message,
+    targetSessionId: typeof details.targetSessionId === 'string'
+      ? details.targetSessionId as SessionId
+      : undefined,
+  }
+}
+
+function mergeFailureKey(failure: MergeFailure): SessionGraphKey {
+  if (failure.stage === 'validating') return 'merge.errorValidation'
+  if (failure.stage === 'creating') return 'merge.errorCreating'
+  if (failure.stage === 'naming') return 'merge.errorNaming'
+  if (failure.stage === 'submitting') return 'merge.errorSubmitting'
+  if (failure.stage === 'opening') return 'merge.errorOpening'
+  return 'merge.errorUnknown'
+}
 
 /** Grid dot spacing in content px. */
 const GRID = 24
@@ -108,7 +150,7 @@ interface NodeGestureHandlers {
 /** One Canvas Session card: title-first hierarchy, state, metadata, and terminals. */
 function NodeCard({
   laid, now, t, gestures, clusterColor, selected, onHoverBadge, badgeHovered,
-  dimClass, onHoverNode,
+  dimClass, onHoverNode, mergeOrder,
 }: {
   laid: LaidOutNode
   now: number
@@ -116,6 +158,7 @@ function NodeCard({
   gestures: NodeGestureHandlers
   clusterColor: string
   selected: boolean
+  mergeOrder: number | undefined
   onHoverBadge: (key: string | null) => void
   badgeHovered: boolean
   dimClass: string | null | undefined
@@ -133,6 +176,7 @@ function NodeCard({
           styles.node,
           styles.sessionNode,
           selected ? styles.nodeSelected : null,
+          mergeOrder === undefined ? null : styles.nodeMergeSelected,
           node.displayStatus === 'waiting-input' ? styles.nodePending : null,
           badgeHovered ? styles.badgeHovered : null,
           dimClass,
@@ -140,8 +184,9 @@ function NodeCard({
         style={{ left: `${x}px`, top: `${y}px` }}
         data-node-id={key}
         data-display-status={node.displayStatus}
+        data-merge-selected={mergeOrder}
         aria-current={node.viewed ? 'true' : undefined}
-        aria-selected={selected}
+        aria-selected={selected || mergeOrder !== undefined}
         onPointerDown={gestures.onPointerDown}
         onPointerMove={gestures.onPointerMove}
         onPointerUp={gestures.onPointerUp}
@@ -174,6 +219,9 @@ function NodeCard({
               : null}
           </span>
         </span>
+        {mergeOrder === undefined
+          ? null
+          : <span className={styles.mergeSelectionOrder} aria-hidden="true">{mergeOrder}</span>}
       </button>
       <span
         className={clsx(styles.nodePort, dimClass)}
@@ -409,10 +457,11 @@ function DigestSection({
 }
 
 function SelectedSessionPanel({
-  node, branchedFrom, now, t, onOpen, onBranch, onGenerateDigest, onClose,
+  node, branchedFrom, mergeSourceTitles, now, t, onOpen, onBranch, onGenerateDigest, onClose,
 }: {
   node: GraphNode | undefined
   branchedFrom: string | undefined
+  mergeSourceTitles: ReadonlyMap<string, string>
   now: number
   t: Translate
   onOpen: GraphViewInjected['openSession']
@@ -541,6 +590,31 @@ function SelectedSessionPanel({
       {branchedFrom === undefined
         ? null
         : <div className={styles.panelRelation}>{t('node.branchedFrom', { name: branchedFrom })}</div>}
+      {node.mergeSources.length === 0
+        ? null
+        : (
+          <section className={styles.mergeRelations} aria-labelledby="session-graph-merge-sources">
+            <div id="session-graph-merge-sources" className={styles.mergeRelationsTitle}>
+              {t('panel.mergeSources')}
+            </div>
+            <ol>
+              {node.mergeSources.map((source, index) => (
+                <li key={source.sessionId}>
+                  <span className={styles.mergeSourceOrder}>{index + 1}</span>
+                  <span className={styles.mergeRelationSource}>
+                    {mergeSourceTitles.get(source.sessionId)
+                      ?? t('panel.mergeUnavailable', { id: source.sessionId })}
+                  </span>
+                  <span className={styles.mergeRelationSnapshot}>
+                    {source.capturedThroughSeq === null
+                      ? t('panel.mergeCompleteSnapshot')
+                      : t('panel.mergeCapturedThrough', { seq: source.capturedThroughSeq })}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
       <DigestSection
         node={node}
         entry={digestBySession[node.id]}
@@ -695,6 +769,7 @@ const CARD_H_MAP = 4
  */
 export function GraphCanvas({
   laid, clusters, arrangement, now, t, onOpen, onBranch, onGenerateDigest,
+  onMerge, onRetryMerge,
 }: {
   laid: LaidOutGraph
   clusters: readonly ClusterInfo[]
@@ -704,6 +779,8 @@ export function GraphCanvas({
   onOpen: GraphViewInjected['openSession']
   onBranch: GraphViewInjected['branchSession']
   onGenerateDigest: GraphViewInjected['generateSessionDigest']
+  onMerge: GraphViewInjected['mergeSessions']
+  onRetryMerge: GraphViewInjected['retrySessionMerge']
 }): ReactElement {
   const surfaceRef = useRef<HTMLDivElement | null>(null)
   const [viewport, setViewport] = useState(initialViewport)
@@ -766,6 +843,12 @@ export function GraphCanvas({
   } | null>(null)
   const suppressClickRef = useRef(false)
   const [selected, setSelected] = useState<SessionId | null>(null)
+  const [mergeMode, setMergeMode] = useState(false)
+  const [mergeSources, setMergeSources] = useState<readonly SessionId[]>([])
+  const [mergeInstruction, setMergeInstruction] = useState('')
+  const [mergeRun, setMergeRun] = useState<MergeRunState>({ phase: 'idle' })
+  const mergeRequestRef = useRef<AbortController | null>(null)
+  useEffect(() => () => { mergeRequestRef.current?.abort() }, [])
   const [badgeHover, setBadgeHover] = useState<string | null>(null)
   // Alignment guides of the in-flight node drag (content px), null at rest.
   const [guides, setGuides] = useState<{ x: number | null; y: number | null } | null>(null)
@@ -910,6 +993,7 @@ export function GraphCanvas({
     const titleOf = new Map(shown.nodes.map(entry => [entry.key, entry.node.title]))
     const map = new Map<string, string>()
     for (const { edge } of shown.edges) {
+      if (edge.kind !== 'branch') continue
       const title = titleOf.get(edge.from)
       if (title !== undefined) map.set(edge.to, title)
     }
@@ -983,6 +1067,7 @@ export function GraphCanvas({
       // A new pointer sequence cannot be the prior drag's trailing click.
       // Clear a suppression token that no browser click consumed.
       suppressClickRef.current = false
+      if (mergeMode) return
       // Collapsed members are pinned to the compact column; they click but
       // never drag.
       if (collapsedSet.has(clusterId)) return
@@ -1052,9 +1137,19 @@ export function GraphCanvas({
         return
       }
       hidePreview()
+      if (mergeMode) {
+        if (mergeRun.phase === 'submitting'
+          || (mergeRun.phase === 'error' && mergeRun.failure.targetSessionId !== undefined)) return
+        setMergeSources(current => current.includes(id)
+          ? current.filter(sourceId => sourceId !== id)
+          : current.length < 3 ? [...current, id] : current)
+        setMergeRun({ phase: 'idle' })
+        return
+      }
       setSelected(id)
     },
     onDoubleClick: () => {
+      if (mergeMode) return
       onOpen(id)
     },
   })
@@ -1188,6 +1283,44 @@ export function GraphCanvas({
       : [...collapsed, rootId]
     setCollapsed(next)
     persist(positionsRef.current, next, offsetsRef.current)
+  }
+
+  const closeMerge = (): void => {
+    if (mergeRun.phase === 'submitting') return
+    mergeRequestRef.current?.abort()
+    mergeRequestRef.current = null
+    setMergeMode(false)
+    setMergeSources([])
+    setMergeRun({ phase: 'idle' })
+  }
+
+  const submitMerge = (): void => {
+    if (mergeSources.length < 2 || mergeSources.length > 3
+      || mergeInstruction.trim() === '' || containsSessionReferenceUri(mergeInstruction)
+      || mergeRun.phase === 'submitting') return
+    const controller = new AbortController()
+    mergeRequestRef.current?.abort()
+    mergeRequestRef.current = controller
+    const failedTarget = mergeRun.phase === 'error'
+      ? mergeRun.failure.targetSessionId
+      : undefined
+    setMergeRun({ phase: 'submitting' })
+    const request = failedTarget === undefined
+      ? onMerge(mergeSources, mergeInstruction, controller.signal)
+      : onRetryMerge(failedTarget, mergeSources, mergeInstruction, controller.signal)
+    void request
+      .then(() => {
+        if (mergeRequestRef.current !== controller || controller.signal.aborted) return
+        mergeRequestRef.current = null
+        setMergeMode(false)
+        setMergeSources([])
+        setMergeRun({ phase: 'idle' })
+      })
+      .catch(error => {
+        if (mergeRequestRef.current !== controller || controller.signal.aborted) return
+        mergeRequestRef.current = null
+        setMergeRun({ phase: 'error', failure: mergeFailureOf(error) })
+      })
   }
 
   /** Frame title-band gestures: drag the whole cluster by its title band. */
@@ -1376,6 +1509,7 @@ export function GraphCanvas({
             const to = shown.nodes.find(entry => entry.key === edge.to)
             if (to === undefined) return null
             const cx = to.x + NODE_W / 2
+            const merge = edge.kind === 'merge'
             return (
               <g
                 key={edge.id}
@@ -1393,12 +1527,12 @@ export function GraphCanvas({
                   onMouseLeave={() => { setHoverEdge(null) }}
                 />
                 <path
-                  className={styles.edgeBranch}
-                  data-edge-kind="branch"
+                  className={merge ? styles.edgeMerge : styles.edgeBranch}
+                  data-edge-kind={edge.kind}
                   d={path}
                 />
                 <path
-                  className={styles.edgeBranchArrow}
+                  className={merge ? styles.edgeMergeArrow : styles.edgeBranchArrow}
                   d={`M ${cx - 6} ${to.y - 9} L ${cx} ${to.y} L ${cx + 6} ${to.y - 9} Z`}
                 />
               </g>
@@ -1445,6 +1579,9 @@ export function GraphCanvas({
             t={t}
             gestures={nodeGestures(laidNode.node.id, laidNode.node.clusterId, laidNode.x, laidNode.y)}
             selected={selected === laidNode.node.id}
+            mergeOrder={mergeSources.includes(laidNode.node.id)
+              ? mergeSources.indexOf(laidNode.node.id) + 1
+              : undefined}
             onHoverBadge={setBadgeHover}
             badgeHovered={badgeHover === laidNode.key}
             dimClass={dimmed(laidNode.key) ? dimStyle : null}
@@ -1520,10 +1657,162 @@ export function GraphCanvas({
         >
           {t('toolbar.locate')}
         </button>
+        <span className={styles.controlDivider} aria-hidden="true" />
+        <button
+          type="button"
+          className={styles.mergeToolbarAction}
+          aria-label={t('toolbar.merge')}
+          aria-pressed={mergeMode}
+          disabled={mergeRun.phase === 'submitting'}
+          onClick={() => {
+            if (mergeMode) {
+              closeMerge()
+              return
+            }
+            hidePreview()
+            setSelected(null)
+            setMergeSources([])
+            setMergeInstruction(t('merge.defaultInstruction'))
+            setMergeRun({ phase: 'idle' })
+            setMergeMode(true)
+          }}
+        >
+          {t('toolbar.merge')}
+        </button>
       </div>
+      {mergeMode
+        ? (
+          <div
+            className={clsx(styles.panel, styles.mergePanel)}
+            role="dialog"
+            aria-label={t('merge.title')}
+            data-canvas-overlay=""
+          >
+            <div className={styles.panelHeader}>
+              <div className={styles.panelHeading}>{t('merge.title')}</div>
+              <button
+                type="button"
+                className={styles.panelClose}
+                aria-label={t('merge.close')}
+                disabled={mergeRun.phase === 'submitting'}
+                onClick={closeMerge}
+              >
+                ×
+              </button>
+            </div>
+            <p className={styles.mergeIntro}>{t('merge.intro')}</p>
+            {mergeRun.phase === 'submitting'
+              ? (
+                <div className={styles.mergeProgress} role="status" aria-live="polite">
+                  <span className={styles.digestSpinner} aria-hidden="true" />
+                  <span>{t('merge.submitting')}</span>
+                </div>
+              )
+              : (
+                <div className={styles.mergeCount} role="status" aria-live="polite">
+                  {t('merge.selectedCount', { count: mergeSources.length })}
+                </div>
+              )}
+            {mergeRun.phase === 'error'
+              ? (
+                <div
+                  className={styles.mergeFailure}
+                  role="alert"
+                  data-error-code={mergeRun.failure.code}
+                  data-error-stage={mergeRun.failure.stage}
+                  title={mergeRun.failure.message}
+                >
+                  <span>{t(mergeFailureKey(mergeRun.failure))}</span>
+                  {mergeRun.failure.targetSessionId === undefined
+                    ? null
+                    : <span>{t('merge.targetKept')}</span>}
+                </div>
+              )
+              : null}
+            <ol className={styles.mergeSourceList}>
+              {mergeSources.map((sourceId, index) => {
+                const source = shown.nodes.find(entry => entry.node.id === sourceId)?.node
+                return (
+                  <li key={sourceId}>
+                    <span className={styles.mergeSourceOrder}>{index + 1}</span>
+                    <span>{source?.title ?? sourceId}</span>
+                    <button
+                      type="button"
+                      disabled={mergeRun.phase === 'submitting'
+                        || (mergeRun.phase === 'error'
+                          && mergeRun.failure.targetSessionId !== undefined)}
+                      aria-label={t('merge.remove', { name: source?.title ?? sourceId })}
+                      onClick={() => {
+                        setMergeSources(current => current.filter(id => id !== sourceId))
+                        if (mergeRun.phase === 'error') setMergeRun({ phase: 'idle' })
+                      }}
+                    >
+                      ×
+                    </button>
+                  </li>
+                )
+              })}
+            </ol>
+            <label className={styles.mergeInstructionLabel}>
+              <span>{t('merge.instruction')}</span>
+              <textarea
+                value={mergeInstruction}
+                aria-label={t('merge.instruction')}
+                rows={4}
+                disabled={mergeRun.phase === 'submitting'
+                  || (mergeRun.phase === 'error'
+                    && mergeRun.failure.targetSessionId !== undefined)}
+                onChange={(event) => {
+                  setMergeInstruction(event.target.value)
+                  if (mergeRun.phase === 'error') setMergeRun({ phase: 'idle' })
+                }}
+              />
+              {containsSessionReferenceUri(mergeInstruction)
+                ? (
+                  <span className={styles.mergeInstructionError} role="alert">
+                    {t('merge.referenceInstruction')}
+                  </span>
+                )
+                : null}
+            </label>
+            {mergeRun.phase === 'error' && mergeRun.failure.targetSessionId !== undefined
+              ? (
+                <button
+                  type="button"
+                  className={styles.mergeOpenTarget}
+                  onClick={() => { onOpen(mergeRun.failure.targetSessionId!) }}
+                >
+                  {t('merge.openTarget')}
+                </button>
+              )
+              : null}
+            <div className={styles.panelActions}>
+              <button
+                type="button"
+                className={styles.panelSecondaryAction}
+                disabled={mergeRun.phase === 'submitting'}
+                onClick={closeMerge}
+              >
+                {t('merge.cancel')}
+              </button>
+              <button
+                type="button"
+                className={styles.panelPrimaryAction}
+                disabled={mergeSources.length < 2 || mergeInstruction.trim() === ''
+                  || containsSessionReferenceUri(mergeInstruction)
+                  || mergeRun.phase === 'submitting'}
+                onClick={submitMerge}
+              >
+                {mergeRun.phase === 'error' ? t('merge.retry') : t('merge.submit')}
+              </button>
+            </div>
+          </div>
+        )
+        : null}
       <SelectedSessionPanel
-        node={selectedNode}
+        node={mergeMode ? undefined : selectedNode}
         branchedFrom={selected === null ? undefined : branchSource.get(selected)}
+        mergeSourceTitles={new Map(shown.nodes.map(entry => [entry.key, entry.node.title]))}
         now={now}
         t={t}
         onOpen={onOpen}

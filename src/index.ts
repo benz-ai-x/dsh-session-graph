@@ -1,4 +1,4 @@
-/** Host loader entry for Session Graph and its explicit Session Digest Remote. */
+/** Host loader entry for Session Graph, Session Digest, and durable Session Merge. */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -20,6 +20,14 @@ import {
   sessionDigestInspectionFromHarness,
   type SessionDigestRouteFallback,
 } from './session-digest-harness.ts'
+import { SESSION_MERGE_PROJECTION_DEFINITION } from './session-merge-projection.ts'
+import {
+  SessionMergeHostError,
+  type SessionMergeHostModule,
+} from './session-merge-host.ts'
+import { createSessionMergeHarnessModule } from './session-merge-harness.ts'
+import type { SessionMergeSubmission } from './session-merge.ts'
+import type { SessionMergeProjection } from './session-merge-projection.ts'
 
 /** Optional auxiliary-model fallback and bounded output policy. */
 export interface Config {
@@ -38,7 +46,7 @@ interface ResolvedConfig {
 const DEFAULT_MAX_OUTPUT_TOKENS = 800
 const DEFAULT_TIMEOUT_MS = 60_000
 
-/** Host services required by the read-only digest capability. */
+/** Eager Host services required by the read-only digest capability. */
 export const inject = ['sessionPersistence', 'llm']
 
 function positiveInteger(value: number | undefined, fallback: number, label: string): number {
@@ -173,7 +181,44 @@ export class SessionGraphDigestService extends TypertRemoteService {
   }
 }
 
-/** Install one read-only Session Digest Host service. */
+/** Package-owned Host service that submits one durable Session Merge capture. */
+export class SessionGraphMergeService extends TypertRemoteService {
+  private readonly merges: SessionMergeHostModule
+
+  constructor(ctx: Context) {
+    super(ctx, 'sessionGraphMerge')
+    this.merges = createSessionMergeHarnessModule(ctx)
+  }
+
+  @Remote('submit')
+  async submit(
+    request: SessionMergeSubmission,
+    signal: AbortSignal,
+  ): Promise<SessionMergeProjection> {
+    try {
+      return await this.merges.submit(request, signal)
+    } catch (error) {
+      if (signal.aborted) throw error
+      const code = error instanceof SessionMergeHostError ? error.code : 'merge-submit-failed'
+      const stage = error instanceof SessionMergeHostError ? error.stage : 'capturing'
+      const message = error instanceof Error ? error.message : 'Session Merge submission failed'
+      throw new TypertRemoteFailure({ code, message, details: { stage } })
+    }
+  }
+}
+
+/** Install the digest service, Merge projection, and deferred Merge submission service. */
 export function apply(ctx: Context, config: Config = {}): void {
   new SessionGraphDigestService(ctx, resolveConfig(config))
+  void ctx.inject(['sessionProjections'], projectionCtx => {
+    projectionCtx.sessionProjections.register(SESSION_MERGE_PROJECTION_DEFINITION)
+  })
+  void ctx.inject([
+    'sessionController',
+    'sessionReferenceResolver',
+    'sessionProjections',
+    'sessionProjectionCache',
+  ], mergeCtx => {
+    new SessionGraphMergeService(mergeCtx)
+  })
 }

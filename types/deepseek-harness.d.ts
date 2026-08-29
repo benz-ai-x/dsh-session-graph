@@ -3,6 +3,11 @@ declare module '@deepseek-ai/dsh-session/types' {
   export type SessionId = string & { readonly [sessionIdBrand]: true }
 }
 
+declare module '@deepseek-ai/dsh-session-projection/types' {
+  export interface SessionProjectionStateMap {}
+  export interface SessionProjectionMap {}
+}
+
 declare module '@deepseek-ai/dsh-api-session-controller/client' {
   export interface SessionSummary {
     readonly id: import('@deepseek-ai/dsh-session/types').SessionId
@@ -14,6 +19,9 @@ declare module '@deepseek-ai/dsh-api-session-controller/client' {
     readonly completed?: boolean
     readonly blank: boolean
     readonly updatedAt: number
+    readonly projectionValues?: Readonly<{
+      readonly sessionGraphMerge?: import('../src/session-merge-projection.ts').SessionMergeProjection | null
+    }>
   }
 
   export interface SessionListState {
@@ -48,10 +56,17 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       request: import('../src/session-digest.ts').SessionDigestRequest,
       signal?: AbortSignal,
     ) => Promise<RemoteResult<import('../src/session-digest.ts').SessionDigestResult>>
+    'sessionGraphMerge/submit': (
+      request: import('../src/session-merge.ts').SessionMergeSubmission,
+      signal?: AbortSignal,
+    ) => Promise<RemoteResult<import('../src/session-merge-projection.ts').SessionMergeProjection>>
   }
   export interface TypertRemoteNamespaceMap {
     sessionGraphDigest: {
       generate: TypertRemoteMap['sessionGraphDigest/generate']
+    }
+    sessionGraphMerge: {
+      submit: TypertRemoteMap['sessionGraphMerge/submit']
     }
   }
   export class TypertRemoteFailure extends Error {
@@ -79,8 +94,8 @@ declare module '@deepseek-ai/dsh-llm' {
   }
   export function createUserMessage(input: {
     readonly content: readonly { readonly type: 'text'; readonly text: string }[]
-    readonly source: { readonly kind: 'plugin'; readonly plugin: string }
-  }): unknown
+    readonly source: Readonly<Record<string, unknown>>
+  }): Readonly<Record<string, unknown>>
 }
 
 declare module '@deepseek-ai/dsh-api-remotes/client' {}
@@ -150,17 +165,37 @@ declare module '@deepseek-ai/cordis' {
       ) => () => void
     }
     readonly sessions: {
+      readonly list: {
+        getSnapshot: () => import('@deepseek-ai/dsh-api-session-controller/client').SessionListState
+      }
+      create: (options: { readonly workspaceId?: string; readonly cwd?: string }) => Promise<
+        import('@deepseek-ai/dsh-session/types').SessionId
+      >
       open: (sessionId: import('@deepseek-ai/dsh-session/types').SessionId) => void
       fork: (request: {
         readonly sessionId: import('@deepseek-ai/dsh-session/types').SessionId
         readonly increaseTitle: boolean
       }) => Promise<unknown>
+      binding: (sessionId: import('@deepseek-ai/dsh-session/types').SessionId) => {
+        readonly session: {
+          rename: (title: string) => Promise<
+            | { readonly ok: true; readonly value: { readonly title: string; readonly seq: number } }
+            | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
+          >
+        }
+      } | undefined
+    }
+    readonly workspaces: {
+      readonly list: {
+        getSnapshot: () => import('@deepseek-ai/dsh-api-workspace-controller/client').WorkspaceSnapshot
+      }
     }
     readonly remote: {
       $mount: (
         contribution: import('@deepseek-ai/dsh-typert-protocol').TypertRemoteContribution,
       ) => Promise<() => Promise<void>>
       sessionGraphDigest: import('@deepseek-ai/dsh-typert-protocol').TypertRemoteNamespaceMap['sessionGraphDigest']
+      sessionGraphMerge: import('@deepseek-ai/dsh-typert-protocol').TypertRemoteNamespaceMap['sessionGraphMerge']
     }
     readonly invariants: {
       register: (packageName: string, installer: unknown) => () => void
@@ -174,7 +209,38 @@ declare module '@deepseek-ai/cordis' {
     readonly llm: {
       stream: (options: Readonly<Record<string, unknown>>) => AsyncIterable<unknown>
     }
+    readonly sessionProjections: {
+      register: (definition: unknown) => () => void
+      stateOf: (session: unknown, key: string) => unknown
+      onChanged: (listener: (
+        session: unknown,
+        key: string,
+        value: unknown,
+        seq: number,
+      ) => void) => () => void
+    }
+    readonly sessionController: {
+      resolveAgent: (sessionId: import('@deepseek-ai/dsh-session/types').SessionId) => Promise<
+        | { readonly agent: unknown }
+        | { readonly error: { readonly message: string } }
+      >
+    }
+    readonly sessionReferenceResolver: {
+      remoteExportCandidates: (
+        agent: unknown,
+        query: string,
+        signal: AbortSignal,
+      ) => Promise<readonly {
+        readonly sessionId: import('@deepseek-ai/dsh-session/types').SessionId
+        readonly cwd?: string
+        readonly mention: string
+      }[]>
+    }
+    readonly sessionProjectionCache: {
+      write: (session: unknown) => Promise<void>
+    }
     effect: (install: () => unknown, label: string) => void
+    on: (name: string, listener: (...args: never[]) => void) => () => void
   }
 }
 

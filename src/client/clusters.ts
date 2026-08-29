@@ -121,7 +121,8 @@ export function applyOffsets(
     return { ...node, x: node.x + offset.dx, y: node.y + offset.dy }
   })
   const byKey = new Map(nodes.map(node => [node.key, node]))
-  const edges = redrawEdges(laid.edges, byKey, from => !active.has(from.node.clusterId))
+  const edges = redrawEdges(laid.edges, byKey, (from, to) =>
+    !active.has(from.node.clusterId) && !active.has(to.node.clusterId))
   return {
     nodes,
     edges,
@@ -174,9 +175,12 @@ export function applyCollapse(
   })
   if (!laid.nodes.some(node => rowOfKey.has(node.key))) return laid
   const byKey = new Map(nodes.map(node => [node.key, node]))
-  const edges = laid.edges.filter(({ edge }) => {
+  const retained = laid.edges.filter(({ edge }) => {
     const from = byKey.get(edge.from)
-    return from === undefined || !collapsed.has(from.node.clusterId)
+    return edge.kind !== 'branch'
+      || from === undefined
+      || !collapsed.has(from.node.clusterId)
   })
+  const edges = redrawEdges(retained, byKey, () => false)
   return { nodes, edges, ...nodeBounds(nodes) }
 }

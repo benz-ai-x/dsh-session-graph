@@ -28,6 +28,11 @@ interface ViewDefinition {
       options: { readonly refresh: boolean },
       signal: AbortSignal,
     ) => Promise<unknown>
+    readonly mergeSessions: (
+      sourceIds: readonly string[],
+      instruction: string,
+      signal: AbortSignal,
+    ) => Promise<string>
   }
 }
 
@@ -46,13 +51,30 @@ interface FakeContext {
     register: (definition: ViewDefinition, component: unknown) => () => void
   }
   sessions: {
+    list: {
+      getSnapshot: () => Readonly<Record<string, unknown>>
+    }
+    create: (request: Readonly<Record<string, unknown>>) => Promise<string>
+    binding: (id: string) => {
+      session: {
+        rename: (title: string) => Promise<unknown>
+      }
+    } | undefined
     open: (id: string) => void
     fork: (request: { readonly sessionId: string; readonly increaseTitle: boolean }) => Promise<string>
+  }
+  workspaces: {
+    list: {
+      getSnapshot: () => Readonly<Record<string, unknown>>
+    }
   }
   remote: {
     $mount: (contribution: unknown) => Promise<() => Promise<void>>
     sessionGraphDigest: {
       generate: (request: unknown, signal: AbortSignal) => Promise<unknown>
+    }
+    sessionGraphMerge: {
+      submit: (request: unknown, signal: AbortSignal) => Promise<unknown>
     }
   }
 }
@@ -90,7 +112,7 @@ describe('tsdown client artifact', () => {
     const { handoff, plugin } = await loadArtifact()
     expect(handoff.id).toBe(PLUGIN_ID)
     expect(plugin.apply).toBeTypeOf('function')
-    expect(plugin.inject).toEqual(['slots', 'sessions', 'locale', 'remote'])
+    expect(plugin.inject).toEqual(['slots', 'sessions', 'workspaces', 'locale', 'remote'])
   })
 
   it('registers and disposes the Graph view through the dsh Client services', async () => {
@@ -101,12 +123,32 @@ describe('tsdown client artifact', () => {
     const injectedServices: readonly string[][] = []
     const forkRequests: { readonly sessionId: string; readonly increaseTitle: boolean }[] = []
     const digestRequests: { readonly request: unknown; readonly signal: AbortSignal }[] = []
+    const mergeRequests: { readonly request: unknown; readonly signal: AbortSignal }[] = []
+    const createRequests: Readonly<Record<string, unknown>>[] = []
+    const renamed: string[] = []
+    const opened: string[] = []
     const disposeRemote = vi.fn(async () => {})
     const mountRemote = vi.fn(async () => disposeRemote)
     const digestRemote = {
       generate: async (request: unknown, signal: AbortSignal) => {
         digestRequests.push({ request, signal })
         return { ok: true, value: { kind: 'empty' } }
+      },
+    }
+    const mergeRemote = {
+      submit: async (request: unknown, signal: AbortSignal) => {
+        mergeRequests.push({ request, signal })
+        return {
+          ok: true,
+          value: {
+            operationId: 'operation-1',
+            contextEventSeq: 8,
+            sources: [
+              { sessionId: 'source-a', capturedThroughSeq: 3 },
+              { sessionId: 'source-b', capturedThroughSeq: 4 },
+            ],
+          },
+        }
       },
     }
     let ctx: FakeContext
@@ -119,7 +161,11 @@ describe('tsdown client artifact', () => {
             const disposer = install()
             if (typeof disposer === 'function') uiDisposers.push(disposer as () => void | Promise<void>)
           },
-          remote: { $mount: mountRemote, sessionGraphDigest: digestRemote },
+          remote: {
+            $mount: mountRemote,
+            sessionGraphDigest: digestRemote,
+            sessionGraphMerge: mergeRemote,
+          },
         }
         apply(injectedCtx)
         const fiber = Promise.resolve() as Promise<void> & { dispose: () => Promise<void> }
@@ -148,10 +194,56 @@ describe('tsdown client artifact', () => {
         },
       },
       sessions: {
-        open: () => {},
+        list: {
+          getSnapshot: () => ({
+            byId: {
+              'source-a': {
+                id: 'source-a', displayTitle: 'Architecture', cwd: '/workspace',
+                running: false, blank: false, updatedAt: 2,
+              },
+              'source-b': {
+                id: 'source-b', displayTitle: 'Testing', cwd: '/workspace',
+                running: false, blank: false, updatedAt: 1,
+              },
+            },
+          }),
+        },
+        create: async request => {
+          createRequests.push(request)
+          return 'target-session'
+        },
+        binding: id => id === 'target-session'
+          ? {
+              session: {
+                rename: async title => {
+                  renamed.push(title)
+                  return { ok: true, value: { title, seq: 0 } }
+                },
+              },
+            }
+          : undefined,
+        open: id => { opened.push(id) },
         fork: async (request) => {
           forkRequests.push(request)
           return 'child'
+        },
+      },
+      workspaces: {
+        list: {
+          getSnapshot: () => ({
+            items: [{
+              workspaceId: 'workspace-1',
+              path: '/workspace',
+              title: 'Workspace',
+              sessionIds: ['source-a', 'source-b'],
+              createdAt: '',
+              updatedAt: '',
+            }],
+            archivedSessionIds: [],
+            state: 'idle',
+            phase: 'ready',
+            error: undefined,
+          }),
         },
       },
       remote: {
@@ -159,13 +251,17 @@ describe('tsdown client artifact', () => {
         get sessionGraphDigest() {
           throw new Error('cannot get property "remote.sessionGraphDigest" without inject')
         },
+        get sessionGraphMerge() {
+          throw new Error('cannot get property "remote.sessionGraphMerge" without inject')
+        },
       },
     }
 
     const disposePlugin = await plugin.apply(ctx)
     expect(mountRemote).toHaveBeenCalledOnce()
     expect(injectedServices).toEqual([[
-      'slots', 'sessions', 'locale', 'remote.sessionGraphDigest',
+      'slots', 'sessions', 'workspaces', 'locale',
+      'remote.sessionGraphDigest', 'remote.sessionGraphMerge',
     ]])
     expect(views).toHaveLength(1)
     expect(views[0]).toMatchObject({ name: 'conversation.view', id: 'graph' })
@@ -180,6 +276,24 @@ describe('tsdown client artifact', () => {
       request: { sessionId: 'source', refresh: true },
       signal: controller.signal,
     }])
+    await expect(views[0]?.inject().mergeSessions(
+      ['source-a', 'source-b'],
+      'Compare conclusions.',
+      controller.signal,
+    )).resolves.toBe('target-session')
+    expect(createRequests).toEqual([{ workspaceId: 'workspace-1' }])
+    expect(renamed).toEqual(['Merge: Architecture + Testing'])
+    expect(mergeRequests).toHaveLength(1)
+    expect(mergeRequests[0]).toMatchObject({
+      request: {
+        targetSessionId: 'target-session',
+        sourceIds: ['source-a', 'source-b'],
+        instruction: 'Compare conclusions.',
+        operationId: expect.any(String),
+      },
+      signal: controller.signal,
+    })
+    expect(opened).toEqual(['target-session'])
     expect(disposePlugin).toBeTypeOf('function')
     await disposePlugin?.()
     for (const dispose of rootDisposers.reverse()) await dispose()

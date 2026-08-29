@@ -121,11 +121,34 @@ async function bench(byId: Record<string, SessionSummary>) {
   const sessionsStore = createSnapshotStore(listState(byId))
   const open = vi.fn()
   const fork = vi.fn(async () => id('branched'))
+  const create = vi.fn(async () => id('merged'))
+  const rename = vi.fn(async () => ({ ok: true as const, value: undefined }))
   const generateDigest = vi.fn(async () => ({
     ok: true as const,
     value: { kind: 'empty' as const },
   }))
-  ctx.provide('sessions', { open, fork })
+  const submitMerge = vi.fn(async (request: {
+    readonly operationId: string
+    readonly sourceIds: readonly SessionId[]
+  }) => ({
+    ok: true as const,
+    value: {
+      operationId: request.operationId,
+      contextEventSeq: 8,
+      sources: request.sourceIds.map((sessionId, inputIndex) => ({
+        sessionId,
+        capturedThroughSeq: inputIndex + 1,
+      })),
+    },
+  }))
+  ctx.provide('sessions', {
+    list: sessionsStore,
+    open,
+    fork,
+    create,
+    binding: () => ({ session: { rename } }),
+  })
+  ctx.provide('workspaces', { list: createSnapshotStore(workspacesState()) })
   slots.register({
     name: 'root',
     children: { 'conversation.view': { kind: 'list', scope: 'session' } },
@@ -144,12 +167,15 @@ async function bench(byId: Record<string, SessionSummary>) {
   // mounted namespace; mirror that boundary instead of hanging it off the
   // root Remote stub.
   ctx.provide('remote.sessionGraphDigest', { generate: generateDigest } as never)
+  ctx.provide('remote.sessionGraphMerge', { submit: submitMerge } as never)
   ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
   const localeFiber = ctx.plugin({ inject: [...localeInject], apply: localeApply })
   await localeFiber
   const fiber = ctx.plugin({ inject: [...inject], apply })
   await fiber
-  return { ctx, slots, fiber, sessionsStore, open, fork, generateDigest }
+  return {
+    ctx, slots, fiber, sessionsStore, open, fork, create, rename, generateDigest, submitMerge,
+  }
 }
 
 /** Tab projection twin of apply's viewTabs (the render-side consumption path). */
@@ -399,6 +425,48 @@ describe('graph tab rendering and interaction', () => {
     expect(document.body.textContent).toContain('分支')
   })
 
+  it('renders Merge relations as distinct solid edges without describing them as Branches', async () => {
+    const b = await bench({
+      sourceA: session('sourceA', { updatedAt: 500 }),
+      branchChild: session('branchChild', { parentId: id('sourceA'), updatedAt: 450 }),
+      sourceB: session('sourceB', { updatedAt: 400 }),
+      merged: session('merged', {
+        updatedAt: 600,
+        projectionValues: {
+          sessionGraphMerge: {
+            operationId: 'operation-1',
+            contextEventSeq: 8,
+            sources: [
+              { sessionId: id('branchChild'), capturedThroughSeq: 3 },
+              { sessionId: id('sourceB'), capturedThroughSeq: 4 },
+            ],
+          },
+        },
+      }),
+    })
+    mount(b.slots, b.sessionsStore, 'merged')
+    switchTab('Graph')
+
+    expect(document.querySelectorAll('[data-edge-kind="branch"]')).toHaveLength(1)
+    const mergeEdges = document.querySelectorAll('[data-edge-kind="merge"]')
+    expect(mergeEdges).toHaveLength(2)
+    for (const edge of mergeEdges) {
+      expect(edge.getAttribute('stroke-dasharray')).toBeNull()
+      expect(edge.className.baseVal).not.toBe(
+        document.querySelector('[data-edge-kind="branch"]')?.getAttribute('class'),
+      )
+    }
+    expect(document.body.textContent).toContain('汇聚')
+
+    fireEvent.click(nodeButton('merged'))
+    const panel = screen.getByTestId('session-graph-panel')
+    expect(panel.textContent).not.toContain('分支自')
+    expect(panel.textContent).toContain('汇聚来源')
+    expect(panel.textContent).toContain('Session branchChild')
+    expect(panel.textContent).toContain('Session sourceB')
+    expect(panel.textContent).toContain('快照至事件 3')
+  })
+
   it('renders stable input and output ports on every Canvas Session', async () => {
     const b = await bench(FIXTURE)
     mount(b.slots, b.sessionsStore, 'root')
@@ -418,6 +486,159 @@ describe('graph tab rendering and interaction', () => {
       expect(output?.parentElement).toBe(node.parentElement)
       expect(input?.parentElement).not.toBe(node)
     }
+  })
+
+  it('uses an explicit Merge mode and enables submission only for two to three sources', async () => {
+    const b = await bench({
+      sourceA: session('sourceA', { updatedAt: 500 }),
+      sourceB: session('sourceB', { updatedAt: 400 }),
+      sourceC: session('sourceC', { updatedAt: 300 }),
+      sourceD: session('sourceD', { updatedAt: 200 }),
+    })
+    mount(b.slots, b.sessionsStore, 'sourceA')
+    switchTab('Graph')
+
+    fireEvent.click(screen.getByRole('button', { name: '汇聚会话' }))
+    const composer = screen.getByRole('dialog', { name: '汇聚会话' })
+    const submit = screen.getByRole('button', { name: '创建汇聚会话' })
+    expect((submit as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('textbox', { name: '汇聚指令' }) as HTMLTextAreaElement).value)
+      .toBe('综合所选会话的上下文，提炼共识、分歧和待办，并继续完成任务。')
+
+    fireEvent.click(nodeButton('sourceA'))
+    expect(nodeButton('sourceA').getAttribute('data-merge-selected')).toBe('1')
+    expect(composer.textContent).toContain('已选择 1/3')
+    expect((submit as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.click(nodeButton('sourceB'))
+    expect(nodeButton('sourceB').getAttribute('data-merge-selected')).toBe('2')
+    expect(composer.textContent).toContain('已选择 2/3')
+    expect((submit as HTMLButtonElement).disabled).toBe(false)
+
+    fireEvent.click(nodeButton('sourceC'))
+    fireEvent.click(nodeButton('sourceD'))
+    expect(composer.textContent).toContain('已选择 3/3')
+    expect(nodeButton('sourceD').getAttribute('data-merge-selected')).toBeNull()
+  })
+
+  it('keeps Session references in the source picker instead of the free-form instruction', async () => {
+    const b = await bench({
+      sourceA: session('sourceA', { updatedAt: 500 }),
+      sourceB: session('sourceB', { updatedAt: 400 }),
+    })
+    mount(b.slots, b.sessionsStore, 'sourceA')
+    switchTab('Graph')
+
+    fireEvent.click(screen.getByRole('button', { name: '汇聚会话' }))
+    fireEvent.click(nodeButton('sourceA'))
+    fireEvent.click(nodeButton('sourceB'))
+    fireEvent.change(screen.getByRole('textbox', { name: '汇聚指令' }), {
+      target: { value: '同时比较 dsh-session:source-c。' },
+    })
+
+    expect((screen.getByRole('button', { name: '创建汇聚会话' }) as HTMLButtonElement).disabled)
+      .toBe(true)
+    expect(screen.getByRole('alert').textContent)
+      .toContain('请通过会话卡片选择来源，不要在指令中输入 dsh-session 引用。')
+    expect(b.create).not.toHaveBeenCalled()
+  })
+
+  it('shows Merge progress and submits the edited instruction through the browser workflow', async () => {
+    const b = await bench({
+      sourceA: session('sourceA', { updatedAt: 500 }),
+      sourceB: session('sourceB', { updatedAt: 400 }),
+    })
+    const gate = deferred<{
+      readonly ok: true
+      readonly value: {
+        readonly operationId: string
+        readonly contextEventSeq: number
+        readonly sources: readonly {
+          readonly sessionId: SessionId
+          readonly capturedThroughSeq: number
+        }[]
+      }
+    }>()
+    b.submitMerge.mockImplementationOnce(async () => await gate.promise)
+    mount(b.slots, b.sessionsStore, 'sourceA')
+    switchTab('Graph')
+
+    fireEvent.click(screen.getByRole('button', { name: '汇聚会话' }))
+    fireEvent.click(nodeButton('sourceA'))
+    fireEvent.click(nodeButton('sourceB'))
+    fireEvent.change(screen.getByRole('textbox', { name: '汇聚指令' }), {
+      target: { value: '比较两个方案并给出最终建议。' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '创建汇聚会话' }))
+
+    await waitFor(() => { expect(b.submitMerge).toHaveBeenCalledTimes(1) })
+    expect(screen.getByRole('status').textContent).toBe('正在创建汇聚会话…')
+    expect((screen.getByRole('textbox', { name: '汇聚指令' }) as HTMLTextAreaElement).disabled)
+      .toBe(true)
+    expect((screen.getByRole('button', { name: '关闭汇聚会话' }) as HTMLButtonElement).disabled)
+      .toBe(true)
+    expect((screen.getByRole('button', { name: '取消' }) as HTMLButtonElement).disabled)
+      .toBe(true)
+
+    const request = b.submitMerge.mock.calls[0]?.[0] as {
+      readonly operationId: string
+      readonly targetSessionId: SessionId
+      readonly sourceIds: readonly SessionId[]
+      readonly instruction: string
+    }
+    expect(request).toMatchObject({
+      targetSessionId: id('merged'),
+      sourceIds: [id('sourceA'), id('sourceB')],
+      instruction: '比较两个方案并给出最终建议。',
+    })
+    gate.resolve({
+      ok: true,
+      value: {
+        operationId: request.operationId,
+        contextEventSeq: 8,
+        sources: [
+          { sessionId: id('sourceA'), capturedThroughSeq: 3 },
+          { sessionId: id('sourceB'), capturedThroughSeq: 4 },
+        ],
+      },
+    })
+
+    await waitFor(() => { expect(b.open).toHaveBeenCalledWith(id('merged')) })
+    expect(b.create).toHaveBeenCalledWith({ cwd: '/w' })
+    expect(b.rename).toHaveBeenCalledWith('Merge: Session sourceA + Session sourceB')
+    expect(screen.queryByRole('dialog', { name: '汇聚会话' })).toBeNull()
+  })
+
+  it('keeps the target on Merge failure and retries without creating a duplicate Session', async () => {
+    const b = await bench({
+      sourceA: session('sourceA', { updatedAt: 500 }),
+      sourceB: session('sourceB', { updatedAt: 400 }),
+    })
+    b.submitMerge.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: 'persistence-failed',
+        message: 'projection cache unavailable',
+        details: { stage: 'persisting' },
+      },
+    })
+    mount(b.slots, b.sessionsStore, 'sourceA')
+    switchTab('Graph')
+    fireEvent.click(screen.getByRole('button', { name: '汇聚会话' }))
+    fireEvent.click(nodeButton('sourceA'))
+    fireEvent.click(nodeButton('sourceB'))
+    fireEvent.click(screen.getByRole('button', { name: '创建汇聚会话' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('提交源会话快照失败')
+    expect(alert.textContent).toContain('目标会话已保留')
+    expect(screen.getByRole('button', { name: '打开目标会话' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => { expect(b.submitMerge).toHaveBeenCalledTimes(2) })
+    await waitFor(() => { expect(b.open).toHaveBeenCalledWith(id('merged')) })
+    expect(b.create).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('dialog', { name: '汇聚会话' })).toBeNull()
   })
 
   it('presents each Canvas Session title before its secondary metadata', async () => {

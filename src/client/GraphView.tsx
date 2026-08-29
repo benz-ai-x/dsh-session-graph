@@ -1,7 +1,7 @@
 /**
  * The Session Graph tab body: a scope-bound lineage forest of Canvas Sessions
- * (Branch edges between attached nodes, Subagent Derivations folded into
- * Subagent Summary badges). Derives from the sessions/workspaces
+ * (Branch edges within clusters, Merge provenance across clusters, and
+ * Subagent Derivations folded into Subagent Summary badges). Derives from the sessions/workspaces
  * standard feeds; selection stays in the graph while double-click and the
  * details panel navigate through the sessions verbs.
  */
@@ -28,6 +28,19 @@ export interface GraphViewInjected {
     options: { readonly refresh: boolean },
     signal: AbortSignal,
   ) => Promise<SessionDigestResult>
+  /** Create, capture, and open one independent Merge Session. */
+  mergeSessions: (
+    sourceIds: readonly SessionId[],
+    instruction: string,
+    signal: AbortSignal,
+  ) => Promise<SessionId>
+  /** Retry a failed Merge using its already-created target Session. */
+  retrySessionMerge: (
+    targetSessionId: SessionId,
+    sourceIds: readonly SessionId[],
+    instruction: string,
+    signal: AbortSignal,
+  ) => Promise<SessionId>
 }
 
 /** The graph view tab's composed props: runtime share + inject face + locale. */
@@ -43,7 +56,7 @@ export type GraphViewProps =
  */
 export function GraphView({
   sessionId, useSessions, useSessionPendingInteraction, useWorkspaces,
-  openSession, branchSession, generateSessionDigest, t,
+  openSession, branchSession, generateSessionDigest, mergeSessions, retrySessionMerge, t,
 }: GraphViewProps): ReactElement {
   const sessions = useSessions(state => state)
   const pendingInteractions = useSessionPendingInteraction(state => state)
@@ -83,6 +96,8 @@ export function GraphView({
           {t('legend.derivation')}
           <span className={styles.legendLineBranch} />
           {t('legend.branch')}
+          <span className={styles.legendLineMerge} />
+          {t('legend.merge')}
         </span>
         <span className={styles.buildInfo} title={SESSION_GRAPH_BUILD_TITLE}>
           {SESSION_GRAPH_BUILD_LABEL}
@@ -97,6 +112,8 @@ export function GraphView({
         onOpen={openSession}
         onBranch={branchSession}
         onGenerateDigest={generateSessionDigest}
+        onMerge={mergeSessions}
+        onRetryMerge={retrySessionMerge}
       />
     </div>
   )
