@@ -14,7 +14,15 @@ import type {
 } from './session-merge-projection.ts'
 
 interface HarnessSession {
-  readonly header: { readonly cwd?: string }
+  readonly header: {
+    readonly cwd?: string
+    readonly parentSession?: SessionId
+    readonly origin?: 'subagent'
+  }
+  readonly events: readonly {
+    readonly type: string
+    readonly data: unknown
+  }[]
 }
 
 interface HarnessAgent {
@@ -80,23 +88,42 @@ export function sessionMergeDependenciesFromHarness(
       if (cwd === undefined || cwd === '') {
         throw new Error(`target Session ${JSON.stringify(targetSessionId)} has no working directory`)
       }
-      return { targetSessionId, cwd, handle: agent }
+      return {
+        targetSessionId,
+        cwd,
+        ...(agent.session.header.parentSession === undefined
+          ? {}
+          : { parentSessionId: agent.session.header.parentSession }),
+        ...(agent.session.header.origin === undefined
+          ? {}
+          : { origin: agent.session.header.origin }),
+        archived: ctx.workspaceRegistry.archivedSessionIds.includes(targetSessionId as SessionId),
+        events: [...agent.session.events],
+        handle: agent,
+      }
     },
     currentCapture,
     resolveSource: async (target, sourceId, signal) => {
-      const candidates = await ctx.sessionReferenceResolver.remoteExportCandidates(
-        agentOf(target),
-        sourceId,
-        signal,
-      )
+      const [source, candidates] = await Promise.all([
+        ctx.sessionController.inspect(sourceId as SessionId, signal),
+        ctx.sessionReferenceResolver.remoteExportCandidates(
+          agentOf(target),
+          sourceId,
+          signal,
+        ),
+      ])
+      signal.throwIfAborted()
       const candidate = candidates.find(value => value.sessionId === sourceId)
       if (candidate === undefined) {
         throw new Error(`source Session ${JSON.stringify(sourceId)} is unavailable`)
       }
       return {
         sessionId: candidate.sessionId,
-        ...(candidate.cwd === undefined ? {} : { cwd: candidate.cwd }),
+        ...(source.meta.cwd === undefined ? {} : { cwd: source.meta.cwd }),
         mention: candidate.mention,
+        ...(source.meta.origin === undefined ? {} : { origin: source.meta.origin }),
+        archived: ctx.workspaceRegistry.archivedSessionIds.includes(sourceId as SessionId),
+        blank: !source.events.some(event => event.type === 'turn/start'),
       }
     },
     enqueue: (target, input) => {
@@ -161,7 +188,7 @@ export function sessionMergeDependenciesFromHarness(
         if (matchesCaptureSources(raced, sourceIds)) finish({ value: raced })
       })
     },
-    persist: async target => {
+    commitCapture: async target => {
       await ctx.sessionProjectionCache.write(agentOf(target).session)
     },
   }

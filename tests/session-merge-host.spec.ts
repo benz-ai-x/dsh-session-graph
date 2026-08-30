@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createSessionMergeHostModule,
   type SessionMergeHostDependencies,
+  type SessionMergeHostTarget,
 } from '../src/session-merge-host.ts'
 
 function dependencies(calls: string[]): SessionMergeHostDependencies {
@@ -9,6 +10,8 @@ function dependencies(calls: string[]): SessionMergeHostDependencies {
     resolveTarget: async targetSessionId => ({
       targetSessionId,
       cwd: '/workspace',
+      archived: false,
+      events: [],
       handle: { targetSessionId },
     }),
     currentCapture: () => null,
@@ -16,6 +19,8 @@ function dependencies(calls: string[]): SessionMergeHostDependencies {
       sessionId: sourceId,
       cwd: '/workspace',
       mention: `@[${sourceId}](dsh-session:${sourceId})`,
+      archived: false,
+      blank: false,
     }),
     enqueue: (_target, input) => {
       calls.push(`enqueue:${JSON.stringify(input)}`)
@@ -31,8 +36,8 @@ function dependencies(calls: string[]): SessionMergeHostDependencies {
         })),
       }
     },
-    persist: async target => {
-      calls.push(`persist:${target.targetSessionId}`)
+    commitCapture: async target => {
+      calls.push(`commit:${target.targetSessionId}`)
     },
   }
 }
@@ -60,7 +65,7 @@ describe('Session Merge Host submit', () => {
     expect(calls).toEqual([
       'enqueue:{"marker":{"kind":"session-graph-merge","version":1,"operationId":"operation-1","sourceIds":["source-a","source-b"]},"directText":"Compare conclusions and preserve disagreements.\\n\\n@[source-a](dsh-session:source-a)\\n@[source-b](dsh-session:source-b)"}',
       'capture:operation-1',
-      'persist:target-session',
+      'commit:target-session',
     ])
   })
 
@@ -111,6 +116,147 @@ describe('Session Merge Host submit', () => {
     expect(targetResolved).toBe(false)
   })
 
+  it('rejects an established non-Merge Session as a Merge target', async () => {
+    let sourceResolved = false
+    const base = dependencies([])
+    const merges = createSessionMergeHostModule({
+      ...base,
+      resolveTarget: async (targetSessionId, signal) => ({
+        ...await base.resolveTarget(targetSessionId, signal),
+        archived: false,
+        events: [{ type: 'turn/start', data: { turn: 1 } }],
+      }) as SessionMergeHostTarget & {
+        readonly archived: boolean
+        readonly events: readonly { readonly type: string; readonly data: unknown }[]
+      },
+      resolveSource: async (target, sourceId, signal) => {
+        sourceResolved = true
+        return await base.resolveSource(target, sourceId, signal)
+      },
+    })
+
+    const result = merges.submit({
+      targetSessionId: 'target-session',
+      sourceIds: ['source-a', 'source-b'],
+      instruction: 'Compare conclusions.',
+      operationId: 'operation-1',
+    }, new AbortController().signal)
+
+    await expect(result).rejects.toMatchObject({
+      code: 'invalid-target',
+      stage: 'resolving',
+    })
+    expect(sourceResolved).toBe(false)
+  })
+
+  it('rejects a Session with a parent as an independent Merge target', async () => {
+    const base = dependencies([])
+    const merges = createSessionMergeHostModule({
+      ...base,
+      resolveTarget: async (targetSessionId, signal) => ({
+        ...await base.resolveTarget(targetSessionId, signal),
+        parentSessionId: 'parent-session',
+      }),
+    })
+
+    await expect(merges.submit({
+      targetSessionId: 'target-session',
+      sourceIds: ['source-a', 'source-b'],
+      instruction: 'Compare conclusions.',
+      operationId: 'operation-1',
+    }, new AbortController().signal)).rejects.toMatchObject({
+      code: 'invalid-target',
+      stage: 'resolving',
+    })
+  })
+
+  it('allows a failed Merge target to retry only with its originally bound sources', async () => {
+    const calls: string[] = []
+    const base = dependencies(calls)
+    const merges = createSessionMergeHostModule({
+      ...base,
+      resolveTarget: async (targetSessionId, signal) => ({
+        ...await base.resolveTarget(targetSessionId, signal),
+        events: [
+          {
+            type: 'user/message',
+            data: {
+              source: {
+                kind: 'session-graph-merge',
+                version: 1,
+                operationId: 'previous-operation',
+                sourceIds: ['source-a', 'source-b'],
+              },
+            },
+          },
+        ],
+      }),
+    })
+
+    await merges.submit({
+      targetSessionId: 'target-session',
+      sourceIds: ['source-a', 'source-b'],
+      instruction: 'Compare conclusions.',
+      operationId: 'retry-operation',
+    }, new AbortController().signal)
+
+    expect(calls[0]).toContain('enqueue:')
+  })
+
+  it('rejects retrying a bound Merge target with a different ordered source set', async () => {
+    const base = dependencies([])
+    const merges = createSessionMergeHostModule({
+      ...base,
+      resolveTarget: async (targetSessionId, signal) => ({
+        ...await base.resolveTarget(targetSessionId, signal),
+        events: [
+          {
+            type: 'user/message',
+            data: {
+              source: {
+                kind: 'session-graph-merge',
+                version: 1,
+                operationId: 'previous-operation',
+                sourceIds: ['source-a', 'source-b'],
+              },
+            },
+          },
+        ],
+      }),
+    })
+
+    await expect(merges.submit({
+      targetSessionId: 'target-session',
+      sourceIds: ['source-b', 'source-a'],
+      instruction: 'Compare conclusions.',
+      operationId: 'retry-operation',
+    }, new AbortController().signal)).rejects.toMatchObject({
+      code: 'invalid-target',
+      stage: 'resolving',
+    })
+  })
+
+  it.each([
+    { label: 'subagent', facts: { origin: 'subagent' as const, archived: false } },
+    { label: 'archived', facts: { archived: true } },
+  ])('rejects a $label Session as a Merge target', async ({ facts }) => {
+    const base = dependencies([])
+    const merges = createSessionMergeHostModule({
+      ...base,
+      resolveTarget: async (targetSessionId, signal) => ({
+        ...await base.resolveTarget(targetSessionId, signal),
+        ...facts,
+      }),
+    })
+
+    await expect(merges.submit({
+      targetSessionId: 'target-session',
+      sourceIds: ['source-a', 'source-b'],
+      instruction: 'Compare conclusions.',
+      operationId: 'operation-1',
+    }, new AbortController().signal)).rejects.toMatchObject({ code: 'invalid-target' })
+  })
+
   it('rejects a canonical source outside the target working directory', async () => {
     let enqueued = false
     const merges = createSessionMergeHostModule({
@@ -119,6 +265,8 @@ describe('Session Merge Host submit', () => {
         sessionId: sourceId,
         cwd: sourceId === 'source-a' ? '/workspace' : '/other-workspace',
         mention: `@[${sourceId}](dsh-session:${sourceId})`,
+        archived: false,
+        blank: false,
       }),
       enqueue: () => {
         enqueued = true
@@ -139,6 +287,59 @@ describe('Session Merge Host submit', () => {
     expect(enqueued).toBe(false)
   })
 
+  it('rejects a subagent source at the authoritative Host boundary', async () => {
+    let enqueued = false
+    const merges = createSessionMergeHostModule({
+      ...dependencies([]),
+      resolveSource: async (_target, sourceId) => ({
+        sessionId: sourceId,
+        cwd: '/workspace',
+        mention: `@[${sourceId}](dsh-session:${sourceId})`,
+        ...(sourceId === 'source-b' ? { origin: 'subagent' as const } : {}),
+        archived: false,
+        blank: false,
+      }),
+      enqueue: () => {
+        enqueued = true
+      },
+    })
+
+    const result = merges.submit({
+      targetSessionId: 'target-session',
+      sourceIds: ['source-a', 'source-b'],
+      instruction: 'Compare conclusions.',
+      operationId: 'operation-1',
+    }, new AbortController().signal)
+
+    await expect(result).rejects.toMatchObject({
+      code: 'invalid-source',
+      stage: 'resolving',
+    })
+    expect(enqueued).toBe(false)
+  })
+
+  it.each([
+    { label: 'blank', facts: { blank: true, archived: false } },
+    { label: 'archived', facts: { blank: false, archived: true } },
+  ])('rejects a $label source at the authoritative Host boundary', async ({ facts }) => {
+    const merges = createSessionMergeHostModule({
+      ...dependencies([]),
+      resolveSource: async (_target, sourceId) => ({
+        sessionId: sourceId,
+        cwd: '/workspace',
+        mention: `@[${sourceId}](dsh-session:${sourceId})`,
+        ...facts,
+      }),
+    })
+
+    await expect(merges.submit({
+      targetSessionId: 'target-session',
+      sourceIds: ['source-a', 'source-b'],
+      instruction: 'Compare conclusions.',
+      operationId: 'operation-1',
+    }, new AbortController().signal)).rejects.toMatchObject({ code: 'invalid-source' })
+  })
+
   it('rejects a resolver result whose identity does not exactly match the request', async () => {
     const merges = createSessionMergeHostModule({
       ...dependencies([]),
@@ -146,6 +347,8 @@ describe('Session Merge Host submit', () => {
         sessionId: `${sourceId}-lookalike`,
         cwd: '/workspace',
         mention: `@[lookalike](dsh-session:${sourceId}-lookalike)`,
+        archived: false,
+        blank: false,
       }),
     })
 
@@ -240,7 +443,7 @@ describe('Session Merge Host submit', () => {
           { sessionId: 'source-c', capturedThroughSeq: 4 },
         ],
       }),
-      persist: async () => {
+      commitCapture: async () => {
         persisted = true
       },
     })
@@ -281,13 +484,13 @@ describe('Session Merge Host submit', () => {
     }, new AbortController().signal)
 
     expect(result.operationId).toBe('operation-before-timeout')
-    expect(calls).toContain('persist:target-session')
+    expect(calls).toContain('commit:target-session')
   })
 
   it('reports durability-barrier failure instead of claiming success', async () => {
     const merges = createSessionMergeHostModule({
       ...dependencies([]),
-      persist: async () => {
+      commitCapture: async () => {
         throw new Error('projection cache write failed')
       },
     })
@@ -298,6 +501,36 @@ describe('Session Merge Host submit', () => {
       instruction: 'Compare conclusions.',
       operationId: 'operation-1',
     }, new AbortController().signal)
+
+    await expect(result).rejects.toMatchObject({
+      code: 'persistence-failed',
+      stage: 'persisting',
+      message: 'projection cache write failed',
+    })
+  })
+
+  it('keeps commit ownership after caller cancellation reaches the durability barrier', async () => {
+    let startCommit: (() => void) | undefined
+    const commitStarted = new Promise<void>((resolve) => { startCommit = resolve })
+    let failCommit: ((error: Error) => void) | undefined
+    const merges = createSessionMergeHostModule({
+      ...dependencies([]),
+      commitCapture: async () => await new Promise<void>((_resolve, reject) => {
+        failCommit = reject
+        startCommit?.()
+      }),
+    })
+    const controller = new AbortController()
+    const result = merges.submit({
+      targetSessionId: 'target-session',
+      sourceIds: ['source-a', 'source-b'],
+      instruction: 'Compare conclusions.',
+      operationId: 'operation-1',
+    }, controller.signal)
+    await commitStarted
+
+    controller.abort(new Error('caller disconnected after capture'))
+    failCommit?.(new Error('projection cache write failed'))
 
     await expect(result).rejects.toMatchObject({
       code: 'persistence-failed',
@@ -405,6 +638,43 @@ describe('Session Merge Host submit', () => {
     })
   })
 
+  it('keeps caller ownership until an existing capture is validated', async () => {
+    const base = dependencies([])
+    let releaseTarget: (() => void) | undefined
+    const targetBarrier = new Promise<void>((resolve) => { releaseTarget = resolve })
+    let committed = false
+    const merges = createSessionMergeHostModule({
+      ...base,
+      resolveTarget: async (targetSessionId, signal) => {
+        await targetBarrier
+        return await base.resolveTarget(targetSessionId, signal)
+      },
+      currentCapture: () => ({
+        operationId: 'existing-operation',
+        contextEventSeq: 8,
+        sources: [
+          { sessionId: 'source-a', capturedThroughSeq: 3 },
+          { sessionId: 'source-b', capturedThroughSeq: 4 },
+        ],
+      }),
+      commitCapture: async () => { committed = true },
+    })
+    const controller = new AbortController()
+    const reason = new Error('caller left during target resolution')
+    const result = merges.submit({
+      targetSessionId: 'target-session',
+      sourceIds: ['source-a', 'source-b'],
+      instruction: 'Compare conclusions.',
+      operationId: 'retry-operation',
+    }, controller.signal)
+
+    controller.abort(reason)
+    releaseTarget?.()
+
+    await expect(result).rejects.toBe(reason)
+    expect(committed).toBe(false)
+  })
+
   it('reuses an already captured Merge and only retries its durability barrier', async () => {
     const calls: string[] = []
     const base = dependencies(calls)
@@ -428,6 +698,6 @@ describe('Session Merge Host submit', () => {
     }, new AbortController().signal)
 
     expect(result.operationId).toBe('operation-before-network-loss')
-    expect(calls).toEqual(['persist:target-session'])
+    expect(calls).toEqual(['commit:target-session'])
   })
 })

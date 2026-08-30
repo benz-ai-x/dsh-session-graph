@@ -20,7 +20,7 @@ export interface SessionMergeProjection {
   readonly sources: readonly SessionMergeProjectionSource[]
 }
 
-interface MergeMarker {
+export interface SessionMergeMarker {
   readonly operationId: string
   readonly sourceIds: readonly string[]
 }
@@ -28,7 +28,7 @@ interface MergeMarker {
 /** Plain-JSON fold state persisted by the Harness Projection Cache. */
 export interface SessionMergeProjectionState {
   readonly inStep: boolean
-  readonly marker: MergeMarker | null
+  readonly marker: SessionMergeMarker | null
   readonly value: SessionMergeProjection | null
 }
 
@@ -61,20 +61,28 @@ function validSequence(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0
 }
 
-function parseMarker(value: unknown): MergeMarker | null {
-  if (value === null) return null
+function mergeMarkerFields(value: unknown): SessionMergeMarker | undefined {
   const marker = recordOf(value)
-  if (marker === undefined || !hasOnlyKeys(marker, ['operationId', 'sourceIds'])
+  if (marker === undefined
     || typeof marker.operationId !== 'string' || marker.operationId.trim() === ''
     || !Array.isArray(marker.sourceIds) || marker.sourceIds.length < 2
     || marker.sourceIds.length > 3 || marker.sourceIds.some(id => !validSessionId(id))
-    || new Set(marker.sourceIds).size !== marker.sourceIds.length) {
-    throw new Error('Invalid Session Merge projection state')
-  }
+    || new Set(marker.sourceIds).size !== marker.sourceIds.length) return undefined
   return {
     operationId: marker.operationId,
     sourceIds: marker.sourceIds as string[],
   }
+}
+
+function parseMarker(value: unknown): SessionMergeMarker | null {
+  if (value === null) return null
+  const marker = recordOf(value)
+  const parsed = mergeMarkerFields(marker)
+  if (marker === undefined || !hasOnlyKeys(marker, ['operationId', 'sourceIds'])
+    || parsed === undefined) {
+    throw new Error('Invalid Session Merge projection state')
+  }
+  return parsed
 }
 
 function parseProjection(value: unknown): SessionMergeProjection | null {
@@ -116,7 +124,7 @@ function parseProjectionState(value: unknown): SessionMergeProjectionState {
     || typeof state.inStep !== 'boolean') {
     throw new Error('Invalid Session Merge projection state')
   }
-  let marker: MergeMarker | null
+  let marker: SessionMergeMarker | null
   let projection: SessionMergeProjection | null
   try {
     marker = parseMarker(state.marker)
@@ -130,19 +138,14 @@ function parseProjectionState(value: unknown): SessionMergeProjectionState {
   return { inStep: state.inStep, marker, value: projection }
 }
 
-function markerOf(event: SessionMergeProjectionEvent): MergeMarker | undefined {
+/** Decode the canonical Merge marker fields shared by replay and Host retry validation. */
+export function sessionMergeMarkerOfEvent(
+  event: Pick<SessionMergeProjectionEvent, 'type' | 'data'>,
+): SessionMergeMarker | undefined {
   if (event.type !== 'user/message') return undefined
   const source = recordOf(recordOf(event.data)?.source)
-  if (source?.kind !== 'session-graph-merge' || source.version !== 1
-    || typeof source.operationId !== 'string' || source.operationId.trim() === ''
-    || !Array.isArray(source.sourceIds)
-    || source.sourceIds.some(sessionId => !validSessionId(sessionId))
-    || source.sourceIds.length < 2 || source.sourceIds.length > 3
-    || new Set(source.sourceIds).size !== source.sourceIds.length) return undefined
-  return {
-    operationId: source.operationId,
-    sourceIds: source.sourceIds as string[],
-  }
+  if (source?.kind !== 'session-graph-merge' || source.version !== 1) return undefined
+  return mergeMarkerFields(source)
 }
 
 function referenceSources(
@@ -189,7 +192,7 @@ function applySessionMergeProjection(
       : state
   }
   if (!state.inStep) return state
-  const marker = markerOf(event)
+  const marker = sessionMergeMarkerOfEvent(event)
   if (marker !== undefined) return { ...state, marker }
   if (state.marker === null) return state
   const sources = referenceSources(event)
