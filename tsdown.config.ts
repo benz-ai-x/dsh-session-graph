@@ -179,4 +179,18 @@ export default defineConfig([
       intro: 'var module = { exports: {} }; var exports = module.exports;',
     },
   },
+  {
+    name: `${PACKAGE_NAME}/types`,
+    entry: {
+      index: 'src/index.ts',
+      invariant: 'src/invariant.ts',
+      client: 'src/client/index.ts',
+    },
+    outDir: 'lib/types',
+    format: 'esm',
+    platform: 'neutral',
+    target: 'es2024',
+    dts: { emitDtsOnly: true },
+    clean: false,
+  },
 ])

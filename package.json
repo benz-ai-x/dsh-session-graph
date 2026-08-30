@@ -22,10 +22,20 @@
   "version": "0.1.3",
   "type": "module",
   "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
   "exports": {
-    ".": "./lib/index.js",
-    "./invariant": "./lib/invariant.js",
-    "./client": "./lib/client.js",
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./invariant": {
+      "types": "./lib/types/invariant.d.ts",
+      "default": "./lib/invariant.js"
+    },
+    "./client": {
+      "types": "./lib/types/client.d.ts",
+      "default": "./lib/client.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -34,6 +44,7 @@
     "lib/invariant.js",
     "lib/client.js",
     "lib/client.js.map",
+    "lib/types/**/*.d.ts",
     "cordis.patch.yml"
   ],
   "sideEffects": [
