@@ -18,8 +18,12 @@ import {
 } from './session-digest.ts'
 import {
   sessionDigestInspectionFromHarness,
-  type SessionDigestRouteFallback,
 } from './session-digest-harness.ts'
+import {
+  resolveConfig,
+  type Config,
+  type ResolvedConfig,
+} from './config.ts'
 import { SESSION_MERGE_PROJECTION_DEFINITION } from './session-merge-projection.ts'
 import {
   SessionMergeHostError,
@@ -29,53 +33,10 @@ import { createSessionMergeHarnessModule } from './session-merge-harness.ts'
 import type { SessionMergeSubmission } from './session-merge.ts'
 import type { SessionMergeProjection } from './session-merge-projection.ts'
 
-/** Optional auxiliary-model fallback and bounded output policy. */
-export interface Config {
-  readonly provider?: string
-  readonly model?: string
-  readonly maxOutputTokens?: number
-  readonly timeoutMs?: number
-}
-
-interface ResolvedConfig {
-  readonly route?: SessionDigestRouteFallback
-  readonly maxOutputTokens: number
-  readonly timeoutMs: number
-}
-
-const DEFAULT_MAX_OUTPUT_TOKENS = 800
-const DEFAULT_TIMEOUT_MS = 60_000
+export { Config, resolveConfig } from './config.ts'
 
 /** Eager Host services required by the read-only digest capability. */
 export const inject = ['sessionPersistence', 'llm']
-
-function positiveInteger(value: number | undefined, fallback: number, label: string): number {
-  const resolved = value ?? fallback
-  if (!Number.isSafeInteger(resolved) || resolved <= 0) {
-    throw new Error(`session-graph: ${label} must be a positive safe integer`)
-  }
-  return resolved
-}
-
-/** Validate the optional route pair without making it override logged Session routing. */
-export function resolveConfig(config: Config = {}): ResolvedConfig {
-  const provider = config.provider?.trim()
-  const model = config.model?.trim()
-  if ((provider === undefined) !== (model === undefined) || provider === '' || model === '') {
-    throw new Error('session-graph: provider and model must be configured together as non-empty strings')
-  }
-  return {
-    ...(provider === undefined || model === undefined
-      ? {}
-      : { route: { provider, model } }),
-    maxOutputTokens: positiveInteger(
-      config.maxOutputTokens,
-      DEFAULT_MAX_OUTPUT_TOKENS,
-      'maxOutputTokens',
-    ),
-    timeoutMs: positiveInteger(config.timeoutMs, DEFAULT_TIMEOUT_MS, 'timeoutMs'),
-  }
-}
 
 function promptFor(request: SessionDigestModelRequest): string {
   return JSON.stringify({
@@ -163,6 +124,10 @@ export class SessionGraphDigestService extends TypertRemoteService {
       generate: async (request, signal) => await callDigestModel(ctx, config, request, signal),
       now: Date.now,
     })
+    ctx.effect(
+      () => async () => { await this.digests.dispose() },
+      'session-graph.digest-quiescence',
+    )
   }
 
   @Remote('generate')
@@ -198,7 +163,8 @@ export class SessionGraphMergeService extends TypertRemoteService {
     try {
       return await this.merges.submit(request, signal)
     } catch (error) {
-      if (signal.aborted) throw error
+      if (signal.aborted
+        && !(error instanceof SessionMergeHostError && error.stage === 'persisting')) throw error
       const code = error instanceof SessionMergeHostError ? error.code : 'merge-submit-failed'
       const stage = error instanceof SessionMergeHostError ? error.stage : 'capturing'
       const message = error instanceof Error ? error.message : 'Session Merge submission failed'
@@ -218,6 +184,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     'sessionReferenceResolver',
     'sessionProjections',
     'sessionProjectionCache',
+    'workspaceRegistry',
   ], mergeCtx => {
     new SessionGraphMergeService(mergeCtx)
   })

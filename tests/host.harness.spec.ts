@@ -138,6 +138,58 @@ describe('Session Graph Host integration', () => {
     expect(calls).toHaveLength(1)
   })
 
+  it('aborts and joins Session Digest work before Host disposal completes', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    let releaseModel: (() => void) | undefined
+    const modelBarrier = new Promise<void>((resolve) => { releaseModel = resolve })
+    let modelSignal: AbortSignal | undefined
+    ctx.provide('sessionPersistence', {
+      inspect: async (sessionId: SessionId) => ({
+        meta: { id: sessionId },
+        events: [{
+          type: 'user/message',
+          seq: 0,
+          time: 1,
+          data: {
+            source: { kind: 'user' },
+            content: [{ type: 'text', text: 'Wait for plugin disposal.' }],
+          },
+        }],
+      }),
+    })
+    ctx.provide('llm', {
+      async *stream(options: Readonly<Record<string, unknown>>) {
+        modelSignal = options.signal as AbortSignal
+        await modelBarrier
+        modelSignal.throwIfAborted()
+      },
+    })
+    apply(ctx, { provider: 'provider', model: 'model' })
+    const service = ctx.get('sessionGraphDigest') as {
+      generate: (
+        request: { readonly sessionId: string; readonly refresh: boolean },
+        signal: AbortSignal,
+      ) => Promise<unknown>
+    }
+    const result = service.generate(
+      { sessionId: 'dispose-session', refresh: false },
+      new AbortController().signal,
+    ).then(value => value, error => error)
+    while (modelSignal === undefined) await Promise.resolve()
+
+    let disposed = false
+    const disposal = ctx.fiber.dispose().then(() => { disposed = true })
+    await Promise.resolve()
+    expect(modelSignal.aborted).toBe(true)
+    expect(disposed).toBe(false)
+
+    releaseModel?.()
+    await disposal
+    expect(await result).toMatchObject({ failure: { code: 'disposed' } })
+    expect(ctx.get('sessionGraphDigest')).toBeUndefined()
+  })
+
   it('registers the durable Session Merge projection with the Harness registry', async () => {
     const ctx = new Context()
     contexts.push(ctx)
@@ -255,7 +307,7 @@ describe('Session Graph Host integration', () => {
       ],
     }
     let projection: typeof capture | null = null
-    const targetSession = { header: { cwd: '/workspace' } }
+    const targetSession = { header: { cwd: '/workspace' }, events: [] }
     const agent = {
       id: id('target-session'),
       session: targetSession,
@@ -272,6 +324,10 @@ describe('Session Graph Host integration', () => {
     ctx.provide('llm', { async *stream() {} })
     ctx.provide('sessionController', {
       resolveAgent: async () => ({ agent }),
+      inspect: async (sessionId: SessionId) => ({
+        meta: { id: sessionId, cwd: '/workspace' },
+        events: [{ type: 'turn/start', data: { turn: 1 } }],
+      }),
     })
     ctx.provide('sessionReferenceResolver', {
       remoteExportCandidates: async (_agent: unknown, query: string) => [{
@@ -291,6 +347,7 @@ describe('Session Graph Host integration', () => {
       onChanged: () => () => {},
     })
     ctx.provide('sessionProjectionCache', { write })
+    ctx.provide('workspaceRegistry', { archivedSessionIds: [] })
 
     apply(ctx)
     await new Promise(resolve => setImmediate(resolve))
@@ -326,6 +383,90 @@ describe('Session Graph Host integration', () => {
     expect(write).toHaveBeenCalledWith(targetSession)
   })
 
+  it('derives source qualification from Host Session and Workspace truth', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    ctx.provide('sessionController', {
+      resolveAgent: async () => ({ error: { message: 'unused' } }),
+      inspect: async (sessionId: SessionId) => ({
+        meta: {
+          id: sessionId,
+          cwd: '/workspace',
+          origin: 'subagent' as const,
+        },
+        events: [],
+      }),
+    })
+    ctx.provide('sessionReferenceResolver', {
+      remoteExportCandidates: async (_agent: unknown, query: string) => [{
+        sessionId: id(query),
+        cwd: '/workspace',
+        mention: `@[${query}](dsh-session:${query})`,
+      }],
+    })
+    ctx.provide('workspaceRegistry', { archivedSessionIds: [id('source-a')] })
+    const dependencies = sessionMergeDependenciesFromHarness(ctx)
+
+    const source = await dependencies.resolveSource({
+      targetSessionId: 'target-session',
+      cwd: '/workspace',
+      archived: false,
+      events: [],
+      handle: {
+        id: id('target-session'),
+        session: { header: { cwd: '/workspace' }, events: [] },
+        inject: () => {},
+        steer: () => {},
+      },
+    }, 'source-a', new AbortController().signal)
+
+    expect(source).toEqual({
+      sessionId: 'source-a',
+      cwd: '/workspace',
+      mention: '@[source-a](dsh-session:source-a)',
+      origin: 'subagent',
+      archived: true,
+      blank: true,
+    })
+  })
+
+  it('derives target lineage qualification from the Host Session header', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    const targetSession = {
+      header: {
+        cwd: '/workspace',
+        parentSession: id('parent-session'),
+      },
+      events: [{ type: 'turn/start', data: { turn: 1 } }],
+    }
+    const agent = {
+      id: id('target-session'),
+      session: targetSession,
+      inject: () => {},
+      steer: () => {},
+    }
+    ctx.provide('sessionController', {
+      resolveAgent: async () => ({ agent }),
+    })
+    ctx.provide('workspaceRegistry', { archivedSessionIds: [] })
+    const dependencies = sessionMergeDependenciesFromHarness(ctx)
+
+    const target = await dependencies.resolveTarget(
+      'target-session',
+      new AbortController().signal,
+    )
+
+    expect(target).toMatchObject({
+      targetSessionId: 'target-session',
+      cwd: '/workspace',
+      parentSessionId: 'parent-session',
+      archived: false,
+      events: targetSession.events,
+    })
+    expect(target.handle).toBe(agent)
+  })
+
   it('bounds capture waiting when the target produces neither a projection nor an error', async () => {
     vi.useFakeTimers()
     const ctx = new Context()
@@ -340,9 +481,11 @@ describe('Session Graph Host integration', () => {
     void dependencies.waitForCapture({
       targetSessionId: 'target-session',
       cwd: '/workspace',
+      archived: false,
+      events: [],
       handle: {
         id: id('target-session'),
-        session: { header: { cwd: '/workspace' } },
+        session: { header: { cwd: '/workspace' }, events: [] },
         inject: () => {},
         steer: () => {},
       },
@@ -380,6 +523,8 @@ describe('Session Graph Host integration', () => {
     void dependencies.waitForCapture({
       targetSessionId: 'target-session',
       cwd: '/workspace',
+      archived: false,
+      events: [],
       handle: {
         id: id('target-session'),
         session: targetSession,

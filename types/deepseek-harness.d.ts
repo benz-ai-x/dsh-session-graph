@@ -224,6 +224,17 @@ declare module '@deepseek-ai/cordis' {
         | { readonly agent: unknown }
         | { readonly error: { readonly message: string } }
       >
+      inspect: (
+        sessionId: import('@deepseek-ai/dsh-session/types').SessionId,
+        signal?: AbortSignal,
+      ) => Promise<{
+        readonly meta: {
+          readonly id: import('@deepseek-ai/dsh-session/types').SessionId
+          readonly cwd?: string
+          readonly origin?: 'subagent'
+        }
+        readonly events: readonly { readonly type: string; readonly data: unknown }[]
+      }>
     }
     readonly sessionReferenceResolver: {
       remoteExportCandidates: (
@@ -238,6 +249,9 @@ declare module '@deepseek-ai/cordis' {
     }
     readonly sessionProjectionCache: {
       write: (session: unknown) => Promise<void>
+    }
+    readonly workspaceRegistry: {
+      readonly archivedSessionIds: readonly import('@deepseek-ai/dsh-session/types').SessionId[]
     }
     effect: (install: () => unknown, label: string) => void
     on: (name: string, listener: (...args: never[]) => void) => () => void
