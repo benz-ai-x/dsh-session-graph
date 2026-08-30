@@ -700,4 +700,41 @@ describe('Session Merge Host submit', () => {
     expect(result.operationId).toBe('operation-before-network-loss')
     expect(calls).toEqual(['commit:target-session'])
   })
+
+  it('re-inspects source eligibility before retrying an existing capture', async () => {
+    const base = dependencies([])
+    let committed = false
+    const resolvedSources: string[] = []
+    const merges = createSessionMergeHostModule({
+      ...base,
+      currentCapture: () => ({
+        operationId: 'operation-before-network-loss',
+        contextEventSeq: 8,
+        sources: [
+          { sessionId: 'source-a', capturedThroughSeq: 3 },
+          { sessionId: 'source-b', capturedThroughSeq: 4 },
+        ],
+      }),
+      resolveSource: async (target, sourceId, signal) => {
+        resolvedSources.push(sourceId)
+        return {
+          ...await base.resolveSource(target, sourceId, signal),
+          archived: sourceId === 'source-a',
+        }
+      },
+      commitCapture: async () => { committed = true },
+    })
+
+    await expect(merges.submit({
+      targetSessionId: 'target-session',
+      sourceIds: ['source-a', 'source-b'],
+      instruction: 'Compare conclusions.',
+      operationId: 'retry-operation',
+    }, new AbortController().signal)).rejects.toMatchObject({
+      code: 'invalid-source',
+      stage: 'resolving',
+    })
+    expect(resolvedSources).toEqual(['source-a', 'source-b'])
+    expect(committed).toBe(false)
+  })
 })

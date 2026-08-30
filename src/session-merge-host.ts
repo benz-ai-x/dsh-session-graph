@@ -215,18 +215,8 @@ export function createSessionMergeHostModule(
             'resolving',
           )
         }
-        try {
-          await dependencies.commitCapture(target)
-        } catch (error) {
-          throw new SessionMergeHostError(
-            'persistence-failed',
-            failureMessage(error, 'Failed to persist Session Merge capture'),
-            'persisting',
-          )
-        }
-        return existing
       }
-      if (!targetAcceptsSources(target, request.sourceIds)) {
+      if (existing === null && !targetAcceptsSources(target, request.sourceIds)) {
         throw new SessionMergeHostError(
           'invalid-target',
           'The Merge target already contains a different established conversation',
@@ -268,6 +258,18 @@ export function createSessionMergeHostModule(
           'Session Merge sources must share the target working directory',
           'resolving',
         )
+      }
+      if (existing !== null) {
+        try {
+          await dependencies.commitCapture(target)
+        } catch (error) {
+          throw new SessionMergeHostError(
+            'persistence-failed',
+            failureMessage(error, 'Failed to persist Session Merge capture'),
+            'persisting',
+          )
+        }
+        return existing
       }
       try {
         dependencies.enqueue(target, {
