@@ -149,6 +149,12 @@ declare module '@deepseek-ai/dsh-client-ui-workspace/client' {}
 
 declare module '@deepseek-ai/cordis' {
   export interface Context {
+    plugin(
+      plugin: {
+        readonly name?: string
+        apply(ctx: Context): void | Promise<void>
+      },
+    ): Promise<void> & { dispose: () => Promise<void> }
     inject(
       services: readonly string[],
       apply: (ctx: Context) => void | Promise<void>,
