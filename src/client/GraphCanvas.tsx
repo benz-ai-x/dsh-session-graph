@@ -15,13 +15,11 @@ import {
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SessionDigest } from '../session-digest.ts'
 import { containsSessionReferenceUri } from '../session-merge.ts'
-import {
-  applyCollapse, applyOffsets, CLUSTER_COLORS, clusterFrames, contentBounds,
-} from './clusters.ts'
+import { CLUSTER_COLORS } from './clusters.ts'
 import type { ClusterInfo, DisplayStatus, GraphNode } from './graph-model.ts'
 import { branchLineage, matchFilter } from './graph-model.ts'
 import {
-  applyPositions, CARD_H, NODE_W, type ContentBounds, type LaidOutGraph, type LaidOutNode,
+  CARD_H, NODE_W, type ContentBounds, type LaidOutGraph, type LaidOutNode,
 } from './layout.ts'
 import {
   type ClusterOffset, loadArrangement, saveLayout, type NodePosition,
@@ -32,6 +30,7 @@ import { placePreview } from './preview-placement.ts'
 import { snapPosition } from './snap.ts'
 import type { GraphViewInjected } from './GraphView.tsx'
 import type { LaidOutFrame } from './clusters.ts'
+import { deriveCanvasPresentation } from './canvas-presentation.ts'
 import {
   fitViewport, initialViewport, minimapProjection, panBy, resizeViewport, zoomAt,
 } from './viewport.ts'
@@ -946,19 +945,16 @@ export function GraphCanvas({
     if (best === undefined) return
     document.querySelector<HTMLElement>(`[data-node-id="${best.key}"]`)?.focus()
   }
-  const shown = useMemo(
-    () => applyOffsets(applyCollapse(applyPositions(laid, positions), clusters, collapsedSet), offsets),
+  const { shown, frames, bounds, automaticBounds } = useMemo(
+    () => deriveCanvasPresentation({
+      laid,
+      clusters,
+      positions,
+      collapsed: collapsedSet,
+      offsets,
+    }),
     [laid, positions, clusters, collapsedSet, offsets],
   )
-  const frames = useMemo(
-    () => clusterFrames(shown, clusters, collapsedSet),
-    [shown, clusters, collapsedSet],
-  )
-  const bounds = useMemo(() => contentBounds(shown, frames), [shown, frames])
-  const automaticBounds = useMemo(() => {
-    const automaticFrames = clusterFrames(laid, clusters)
-    return contentBounds(laid, automaticFrames)
-  }, [laid, clusters])
   useEffect(() => {
     if (restoredArrangementKey !== arrangement.key || fittedRef.current) return
     // The conversation shell measures its composer after the first paint.

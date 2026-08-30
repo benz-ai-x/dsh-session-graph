@@ -55,6 +55,7 @@ export type SessionDigestResult =
 
 /** Stable failure categories consumed by the browser UI. */
 export type SessionDigestErrorCode =
+  | 'disposed'
   | 'invalid-model-output'
   | 'model-route-unavailable'
   | 'generation-failed'
@@ -86,12 +87,20 @@ export interface SessionDigestDependencies {
 /** Public Host seam exercised by Remote and tests alike. */
 export interface SessionDigestModule {
   generate(request: SessionDigestRequest, signal: AbortSignal): Promise<SessionDigestResult>
+  dispose(): Promise<void>
 }
 
 interface DigestShape {
   readonly overview: string
   readonly keyOutcomes: readonly string[]
   readonly openItems: readonly string[]
+}
+
+interface InflightDigest {
+  readonly controller: AbortController
+  readonly promise: Promise<SessionDigestResult>
+  waiters: number
+  settled: boolean
 }
 
 const MAX_SOURCE_BYTES = 32_768
@@ -222,6 +231,43 @@ function digestShape(output: string): DigestShape {
   }
 }
 
+async function waitForDigest(
+  active: InflightDigest,
+  signal: AbortSignal,
+): Promise<SessionDigestResult> {
+  signal.throwIfAborted()
+  active.waiters += 1
+  return await new Promise<SessionDigestResult>((resolve, reject) => {
+    let waiting = true
+    const release = (): void => {
+      if (!waiting) return
+      waiting = false
+      signal.removeEventListener('abort', onAbort)
+      active.waiters -= 1
+      if (active.waiters === 0 && !active.settled) {
+        active.controller.abort(signal.reason)
+      }
+    }
+    const onAbort = (): void => {
+      release()
+      reject(signal.reason)
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    // Abort may race between the initial check and listener registration.
+    if (signal.aborted) onAbort()
+    void active.promise.then(
+      (result) => {
+        release()
+        resolve(result)
+      },
+      (error: unknown) => {
+        release()
+        reject(error)
+      },
+    )
+  })
+}
+
 /**
  * Create the Host-side Session Digest module.
  * @param dependencies - persistence, model, and clock system boundaries.
@@ -231,48 +277,95 @@ export function createSessionDigestModule(
   dependencies: SessionDigestDependencies,
 ): SessionDigestModule {
   const cache = new Map<string, SessionDigest>()
-  const inflight = new Map<string, Promise<SessionDigestResult>>()
+  const inflight = new Map<string, InflightDigest>()
+  const activeCalls = new Set<Promise<SessionDigestResult>>()
+  const ownedOperations = new Set<Promise<SessionDigestResult>>()
+  const lifecycle = new AbortController()
+  let disposed = false
+  let disposal: Promise<void> | undefined
+
+  const disposedError = (): SessionDigestError => new SessionDigestError(
+    'disposed',
+    'Session Digest module is disposed',
+  )
+
+  const generate = async (
+    request: SessionDigestRequest,
+    signal: AbortSignal,
+  ): Promise<SessionDigestResult> => {
+    signal.throwIfAborted()
+    const inspection = await dependencies.inspect(request.sessionId, signal)
+    signal.throwIfAborted()
+    const sourceRevision = String(inspection.events.at(-1)?.seq ?? -1)
+    const cached = cache.get(request.sessionId)
+    if (!request.refresh && cached?.sourceRevision === sourceRevision) {
+      return { kind: 'ready', digest: cached, cached: true }
+    }
+    const source = digestSource(inspection)
+    if (source === '') return { kind: 'empty' }
+    const inflightKey = `${request.sessionId}\0${sourceRevision}`
+    const active = inflight.get(inflightKey)
+    if (active !== undefined && !active.controller.signal.aborted) {
+      return await waitForDigest(active, signal)
+    }
+    const controller = new AbortController()
+    let created: InflightDigest
+    const operation = (async (): Promise<SessionDigestResult> => {
+      const output = await dependencies.generate({
+        sessionId: request.sessionId,
+        title: inspection.title,
+        ...inspection.modelRoute === undefined ? {} : { modelRoute: inspection.modelRoute },
+        source,
+      }, controller.signal)
+      controller.signal.throwIfAborted()
+      const shape = digestShape(output)
+      const digest: SessionDigest = {
+        sessionId: request.sessionId,
+        sourceRevision,
+        sourceTurnCount: inspection.events.filter(event => event.type === 'turn/end').length,
+        generatedAt: dependencies.now(),
+        generatedWhileRunning: inspection.running,
+        ...shape,
+      }
+      cache.set(request.sessionId, digest)
+      return { kind: 'ready', cached: false, digest }
+    })().finally(() => {
+      created.settled = true
+      ownedOperations.delete(created.promise)
+      if (inflight.get(inflightKey) === created) inflight.delete(inflightKey)
+    })
+    created = {
+      controller,
+      promise: operation,
+      waiters: 0,
+      settled: false,
+    }
+    inflight.set(inflightKey, created)
+    ownedOperations.add(operation)
+    return await waitForDigest(created, signal)
+  }
+
   return {
-    async generate(request, signal) {
-      signal.throwIfAborted()
-      const inspection = await dependencies.inspect(request.sessionId, signal)
-      signal.throwIfAborted()
-      const sourceRevision = String(inspection.events.at(-1)?.seq ?? -1)
-      const cached = cache.get(request.sessionId)
-      if (!request.refresh && cached?.sourceRevision === sourceRevision) {
-        return { kind: 'ready', digest: cached, cached: true }
-      }
-      const source = digestSource(inspection)
-      if (source === '') return { kind: 'empty' }
-      const inflightKey = `${request.sessionId}\0${sourceRevision}`
-      const active = inflight.get(inflightKey)
-      if (active !== undefined) return await active
-      const operation = (async (): Promise<SessionDigestResult> => {
-        const output = await dependencies.generate({
-          sessionId: request.sessionId,
-          title: inspection.title,
-          ...inspection.modelRoute === undefined ? {} : { modelRoute: inspection.modelRoute },
-          source,
-        }, signal)
-        signal.throwIfAborted()
-        const shape = digestShape(output)
-        const digest: SessionDigest = {
-          sessionId: request.sessionId,
-          sourceRevision,
-          sourceTurnCount: inspection.events.filter(event => event.type === 'turn/end').length,
-          generatedAt: dependencies.now(),
-          generatedWhileRunning: inspection.running,
-          ...shape,
-        }
-        cache.set(request.sessionId, digest)
-        return { kind: 'ready', cached: false, digest }
-      })()
-      inflight.set(inflightKey, operation)
-      try {
-        return await operation
-      } finally {
-        if (inflight.get(inflightKey) === operation) inflight.delete(inflightKey)
-      }
+    generate(request, callerSignal) {
+      if (disposed) return Promise.reject(disposedError())
+      const signal = AbortSignal.any([callerSignal, lifecycle.signal])
+      const call = generate(request, signal)
+      activeCalls.add(call)
+      void call.then(
+        () => { activeCalls.delete(call) },
+        () => { activeCalls.delete(call) },
+      )
+      return call
+    },
+    dispose() {
+      if (disposal !== undefined) return disposal
+      disposed = true
+      const error = disposedError()
+      lifecycle.abort(error)
+      for (const active of inflight.values()) active.controller.abort(error)
+      const admitted = [...activeCalls, ...ownedOperations]
+      disposal = Promise.allSettled(admitted).then(() => {})
+      return disposal
     },
   }
 }

@@ -58,7 +58,7 @@ dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
 To install the tagged source directly from GitHub:
 
 ```sh
-dsh plugin --profile web add github:benz-ai-x/dsh-session-graph#v0.1.2
+dsh plugin --profile web add github:benz-ai-x/dsh-session-graph#v0.1.3
 ```
 
 pnpm blocks a git dependency's `prepare` script until the profile explicitly permits it. The first GitHub install exits with `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`; copy the exact key printed by dsh into `$DSH_HOME/profiles/web/pnpm-workspace.yaml` under `allowBuilds`, then rerun the command. This permission executes package code outside the agent sandbox, so inspect the source and pin a tag or commit.
@@ -83,6 +83,7 @@ Open a non-blank session and choose **Graph** beside the standard conversation t
 - A double click opens the session in its last-used view.
 - Dwell on another Canvas Session for a compact preview without replacing the Selected Session inspector.
 - Drag nodes or complete cluster frames to arrange the canvas. Alignment guides snap nearby card edges.
+- Session Arrangement persistence fails soft. If browser storage is unavailable, denied, corrupt, or full, the live graph continues with automatic geometry instead of failing to render.
 - Each Canvas Session exposes stable top input and bottom output terminals for later graph-editing features. Branches are neutral solid directed edges, Merge Relations are branded solid directed edges, and Subagent Derivations are dashed.
 - Use wheel zoom, background-drag panning, fit, 100%, relayout, reset, Viewed Session location, or the minimap. The minimap appears only when content leaves the visible surface, and resizing preserves the current content center and scale.
 - Filter by title; Enter centers the first match and Escape clears the filter.
@@ -98,10 +99,11 @@ Choose **Merge sessions** in the canvas toolbar, then select two or three Canvas
 - Sources must be distinct, non-blank, non-Subagent Canvas Sessions in the same Workspace or working directory.
 - Choose every source on the canvas. Merge instructions cannot contain `dsh-session:` references, because Harness reserves them for the exact source snapshot set.
 - Harness creates one independent target Session, gives it a source-derived title, and captures each source at an immutable event boundary. The sources and their existing Branch lineages remain unchanged.
+- At submission time the Host re-inspects the target and every source instead of trusting browser metadata. It accepts only non-archived, non-blank Canvas Session sources in the target directory, and only an unparented blank target or an exact same-source retry target.
 - The target's normal agent loop receives the edited instruction plus canonical Harness Session references. This feature does not choose a separate summary model; the target uses its normal configured model route when it processes the queued request.
 - A Merge Session remains its own Session Cluster. Branded Merge Relations show provenance from each source cluster without turning those sources into parents.
 - The Session Inspector lists the source titles and capture boundaries for a selected Merge Session. Merge provenance is projected from the target log and checkpointed in Harness's durable Projection Cache, so it survives restart and cold log replay.
-- If target creation succeeds but naming, snapshot submission, persistence, or opening fails, the target is preserved. **Try again** reuses that target instead of creating a duplicate; a late capture from the prior attempt is accepted only when its ordered source set matches exactly. **Open target session** remains available for recovery.
+- If target creation succeeds but naming, snapshot submission, persistence, or opening fails, the target is preserved. **Try again** reuses that target instead of creating a duplicate; a late capture from the prior attempt is accepted only when its ordered source set matches exactly. Once the Host starts committing a matched capture to durable projection storage, closing the view no longer cancels that commit. **Open target session** remains available for recovery.
 
 Source selection can be cancelled before submission. Once submission starts, the controls stay locked until it succeeds or produces a recoverable error; leaving the view still aborts its browser request. Host capture waiting is also bounded, and a timeout is reported as a retryable snapshot-submission failure.
 
@@ -114,6 +116,7 @@ Select any non-blank Canvas Session and choose **Generate digest** in the Sessio
 - The auxiliary request uses no tools and asks for structured output: a concise overview, key outcomes, and open items. It uses the Session's latest logged provider/model route; an optional configured route is only a fallback.
 - A digest generated while the Session is running is labeled **Running snapshot**. New activity marks the visible digest **Session has new content** without hiding it; choose **Update digest** to replace it.
 - Successful results are cached in Host memory by Session and source revision. **Regenerate** bypasses that cache. Empty or failed results are not cached as successful digests and can be retried.
+- Concurrent requests for the same revision share one model call without sharing caller cancellation. Plugin shutdown stops new digest work, cancels owned work, and waits for admitted requests to settle before removing the service.
 
 This is an additional model request and may incur the selected provider's normal cost. Digest text is a read-only projection: it is not a conversation message, does not enter the Session log, and does not change Session Lineage.
 
@@ -128,7 +131,7 @@ Most sessions need no configuration because their logs record the model route. F
     timeoutMs: 60000
 ```
 
-`provider` and `model` must be supplied together and never override a route recorded by the Session. `maxOutputTokens` defaults to `800`; `timeoutMs` defaults to `60000`.
+`provider` and `model` must be supplied together and never override a route recorded by the Session. `maxOutputTokens` defaults to `800`; `timeoutMs` defaults to `60000`. Plugin activation validates this configuration through its exported Standard Schema and rejects blank routes, incomplete pairs, non-integers, and non-positive limits.
 
 ## Develop
 
@@ -139,7 +142,7 @@ pnpm install
 pnpm run check
 ```
 
-`pnpm run check` type-checks the standalone package, builds the Host and browser entries, and runs 142 package-owned tests. To run the 93 Host and full-interaction integration tests against a prepared DeepSeek Harness checkout:
+`pnpm run check` type-checks the standalone package, builds the Host and browser entries, and runs the package-owned test suite. To run the Host and full-interaction integration suite against a prepared DeepSeek Harness checkout:
 
 ```sh
 DSH_HARNESS_ROOT=/path/to/deepseek-harness pnpm test:harness
@@ -163,7 +166,7 @@ The package uses an [npm trusted publisher](https://docs.npmjs.com/trusted-publi
 
 Every GitHub Release must first update `package.json`. Build and verify that the Graph header badge shows the same version, merge the change, create the matching immutable `v<version>` tag, and then publish the Release. To publish an existing tag such as `v0.1.2`, run the Publish workflow manually and pass that tag.
 
-The package exports two host entries and one lazy browser module:
+The package exports two Host entries and one lazy browser module. Every JavaScript entry ships a matching TypeScript declaration in the packed archive:
 
 | Export | Purpose |
 |---|---|
@@ -174,12 +177,13 @@ The package exports two host entries and one lazy browser module:
 
 ## Implementation
 
-`GraphView` reads the Viewed Session, Workspace membership, session summaries, and pending-interaction map. Pure helpers derive Session Clusters, Branch and Merge edges, Subagent Summaries, cross-cluster ordering, layout, snapping, Title Filter matches, and viewport state before `GraphCanvas` renders the result. The Host exposes separate package-owned Remotes for read-only Session Digests and atomic Session Merge capture. Merge submission queues an explicit marker and canonical references, waits for the matching projection, then writes the Projection Cache before reporting success.
+`GraphView` reads the Viewed Session, Workspace membership, session summaries, and pending-interaction map. Indexed pure helpers derive Session Clusters, Branch and Merge edges, Subagent Summaries, cross-cluster ordering, layout, snapping, Title Filter matches, and viewport state. A separate presentation pipeline applies node positions, collapse state, and cluster offsets before `GraphCanvas` renders the result. The Host exposes separate package-owned Remotes for read-only Session Digests and atomic Session Merge capture. Merge submission revalidates Host truth, queues an explicit marker and canonical references, waits for the matching projection, then writes the Projection Cache before reporting success.
 
 | File | Responsibility |
 |---|---|
 | [`src/client/GraphView.tsx`](src/client/GraphView.tsx) | Workspace/Directory Scope resolution, graph derivation, and view header |
 | [`src/client/GraphCanvas.tsx`](src/client/GraphCanvas.tsx) | Canvas rendering, ports, inspector, controls, gestures, hover state, and minimap |
+| [`src/config.ts`](src/config.ts) | Exported Standard Schema, defaults, and normalized Host configuration |
 | [`src/index.ts`](src/index.ts) | Session Digest and Session Merge Host services, projection registration, configuration, and Remote errors |
 | [`src/session-digest.ts`](src/session-digest.ts) and [`src/session-digest-harness.ts`](src/session-digest-harness.ts) | Event filtering, input budgeting, route reconstruction, output validation, revision cache, and concurrency control |
 | [`src/session-merge.ts`](src/session-merge.ts), [`src/session-merge-host.ts`](src/session-merge-host.ts), and [`src/session-merge-harness.ts`](src/session-merge-harness.ts) | Browser workflow, Host validation, canonical reference submission, bounded capture, idempotent retry, and durability barrier |
@@ -187,9 +191,10 @@ The package exports two host entries and one lazy browser module:
 | [`src/client/session-digest-remote.ts`](src/client/session-digest-remote.ts) | Strict browser Remote request/result contract |
 | [`src/client/session-merge-remote.ts`](src/client/session-merge-remote.ts) | Strict browser Session Merge Remote request/result contract |
 | [`src/client/graph-model.ts`](src/client/graph-model.ts) | Graph Scope resolution, Branch and Merge edges, Session Cluster ordering, Subagent Summaries, Title Filter matches, and Branch Lineages |
+| [`src/client/canvas-presentation.ts`](src/client/canvas-presentation.ts) | Ordered Session Arrangement projection and final/automatic content bounds |
 | [`src/client/layout.ts`](src/client/layout.ts) and [`src/client/clusters.ts`](src/client/clusters.ts) | Tree coordinates, frames, collapse, offsets, and edge paths |
 | [`src/client/viewport.ts`](src/client/viewport.ts), [`src/client/preview-placement.ts`](src/client/preview-placement.ts), and [`src/client/snap.ts`](src/client/snap.ts) | Zoom, pan, resize preservation, fit, minimap/preview placement, and alignment guides |
-| [`src/client/layout-store.ts`](src/client/layout-store.ts) | Per-scope Session Arrangement persistence, migration, and invalid-record recovery |
+| [`src/client/layout-store.ts`](src/client/layout-store.ts) | Per-scope Session Arrangement persistence, migration, and fail-soft storage recovery |
 
 ## Current limitations
 

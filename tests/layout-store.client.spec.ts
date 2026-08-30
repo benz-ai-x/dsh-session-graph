@@ -178,4 +178,26 @@ describe('layout persistence', () => {
       offsets: { b: { dx: 3, dy: 4 } },
     })
   })
+
+  it('fails soft when the storage backend rejects reads', () => {
+    const storage = memoryStorage()
+    storage.getItem = () => {
+      throw new DOMException('storage is disabled', 'SecurityError')
+    }
+
+    expect(loadLayout('/w', storage)).toBeUndefined()
+  })
+
+  it('fails soft when the storage backend rejects writes', () => {
+    const storage = memoryStorage()
+    storage.setItem = () => {
+      throw new DOMException('storage quota is exhausted', 'QuotaExceededError')
+    }
+
+    expect(() => saveLayout('/w', {
+      positions: { a: { x: 1, y: 2 } },
+      collapsed: [],
+      offsets: {},
+    }, storage)).not.toThrow()
+  })
 })

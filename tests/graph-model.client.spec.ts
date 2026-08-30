@@ -149,6 +149,28 @@ describe('deriveSessionGraph clusters', () => {
     })
     expect(graph.clusters.map(cluster => cluster.rootId)).toEqual(['aA', 'bB', 'fresh', 'tieA', 'old'])
   })
+
+  it('indexes Branch children with linear parent lookups', () => {
+    let parentReads = 0
+    const count = 80
+    const rows: Record<string, SessionSummary> = {}
+    for (let index = 0; index < count; index += 1) {
+      const key = `node-${String(index)}`
+      const row = session(key, { updatedAt: count - index })
+      const parentId = index === 0 ? undefined : id(`node-${String(index - 1)}`)
+      Object.defineProperty(row, 'parentId', {
+        enumerable: true,
+        get: () => {
+          parentReads += 1
+          return parentId
+        },
+      })
+      rows[key] = row
+    }
+
+    expect(graphFor(rows).sessionCount).toBe(count)
+    expect(parentReads).toBeLessThan(count * 10)
+  })
 })
 
 describe('deriveSessionGraph subagent folding', () => {

@@ -57,11 +57,11 @@ A directed lineage relation from one Canvas Session to a child Canvas Session. C
 _Avoid_: Fork, Subagent Derivation
 
 **Merge Session**:
-An independent Canvas Session initialized from an explicit instruction and immutable snapshots of two or three source sessions. It is not a Branch, and its creation does not change its sources.
+An independent Canvas Session with no parent Session, initialized from an explicit instruction and immutable snapshots of two or three source sessions. At capture time it is either blank or already bound to the exact same ordered Merge Sources by its first Merge marker, which makes retry idempotent. It is not a Branch, and its creation does not change its sources.
 _Avoid_: Aggregated session, merged branch, combined thread
 
 **Merge Source**:
-A Canvas Session selected to contribute one snapshot to a Merge Session. All Merge Sources belong to the same Workspace or working directory.
+A Canvas Session selected to contribute one snapshot to a Merge Session. At submission time the Host confirms that every source is non-blank, non-archived, not a Subagent Session, and shares the target working directory; browser metadata is never authoritative for eligibility.
 _Avoid_: Parent session, input branch
 
 **Session Snapshot**:

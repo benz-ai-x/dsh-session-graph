@@ -311,6 +311,231 @@ describe('Session Digest host interface', () => {
     expect(results[0]?.kind === 'ready' && results[0].digest.generatedWhileRunning).toBe(true)
   })
 
+  it('lets one concurrent caller cancel without cancelling the shared generation', async () => {
+    const inspection: SessionDigestInspection = {
+      title: 'Independently cancellable Session',
+      running: false,
+      events: [{
+        type: 'user/message', seq: 5, time: 1,
+        data: {
+          source: { kind: 'user' },
+          content: [{ type: 'text', text: 'Share the work, not caller ownership.' }],
+        },
+      }],
+    }
+    let modelCalls = 0
+    let releaseModel: (() => void) | undefined
+    const digests = createSessionDigestModule({
+      inspect: async () => inspection,
+      generate: async (_request, signal) => await new Promise<string>((resolve, reject) => {
+        modelCalls += 1
+        releaseModel = () => resolve(
+          '{"overview":"Shared result","keyOutcomes":[],"openItems":[]}',
+        )
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      }),
+      now: () => 250,
+    })
+    const firstController = new AbortController()
+    const first = digests.generate(
+      { sessionId: 'independent-cancel', refresh: false },
+      firstController.signal,
+    )
+    while (releaseModel === undefined) await Promise.resolve()
+    const second = digests.generate(
+      { sessionId: 'independent-cancel', refresh: false },
+      new AbortController().signal,
+    )
+    await Promise.resolve()
+    const cancelled = first.then(
+      () => 'resolved',
+      error => error,
+    )
+    const survivor = second.then(
+      result => result,
+      error => error,
+    )
+
+    firstController.abort(new Error('first caller stopped waiting'))
+    expect(await cancelled).toEqual(expect.objectContaining({
+      message: 'first caller stopped waiting',
+    }))
+    expect(modelCalls).toBe(1)
+
+    releaseModel()
+    expect(await survivor).toEqual(expect.objectContaining({
+      kind: 'ready',
+      cached: false,
+    }))
+  })
+
+  it('aborts shared generation after its last caller stops waiting', async () => {
+    const inspection: SessionDigestInspection = {
+      title: 'Cancelled Session',
+      running: false,
+      events: [{
+        type: 'user/message', seq: 6, time: 1,
+        data: {
+          source: { kind: 'user' },
+          content: [{ type: 'text', text: 'Stop unused work.' }],
+        },
+      }],
+    }
+    let modelSignal: AbortSignal | undefined
+    const digests = createSessionDigestModule({
+      inspect: async () => inspection,
+      generate: async (_request, signal) => await new Promise<string>((_resolve, reject) => {
+        modelSignal = signal
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      }),
+      now: () => 275,
+    })
+    const caller = new AbortController()
+    const result = digests.generate(
+      { sessionId: 'cancelled', refresh: false },
+      caller.signal,
+    )
+    while (modelSignal === undefined) await Promise.resolve()
+
+    caller.abort(new Error('no callers remain'))
+
+    await expect(result).rejects.toEqual(expect.objectContaining({ message: 'no callers remain' }))
+    expect(modelSignal.aborted).toBe(true)
+  })
+
+  it('starts fresh work instead of joining an orphaned cancelled generation', async () => {
+    const inspection: SessionDigestInspection = {
+      title: 'Replacement Session',
+      running: false,
+      events: [{
+        type: 'user/message', seq: 7, time: 1,
+        data: {
+          source: { kind: 'user' },
+          content: [{ type: 'text', text: 'Replace abandoned work.' }],
+        },
+      }],
+    }
+    const releases: Array<(output: string) => void> = []
+    const digests = createSessionDigestModule({
+      inspect: async () => inspection,
+      generate: async () => await new Promise<string>((resolve) => { releases.push(resolve) }),
+      now: () => 280,
+    })
+    const firstController = new AbortController()
+    const first = digests.generate(
+      { sessionId: 'replacement', refresh: false },
+      firstController.signal,
+    )
+    while (releases.length === 0) await Promise.resolve()
+    firstController.abort(new Error('first caller departed'))
+    await expect(first).rejects.toMatchObject({ message: 'first caller departed' })
+
+    const second = digests.generate(
+      { sessionId: 'replacement', refresh: false },
+      new AbortController().signal,
+    )
+    await Promise.resolve()
+    const callsBeforeRelease = releases.length
+    const output = '{"overview":"Replacement","keyOutcomes":[],"openItems":[]}'
+    for (const release of releases) release(output)
+    const outcome = await second.then(result => result, error => error)
+
+    expect(callsBeforeRelease).toBe(2)
+    expect(outcome).toMatchObject({ kind: 'ready', cached: false })
+  })
+
+  it('joins orphaned provider work during disposal', async () => {
+    const inspection: SessionDigestInspection = {
+      title: 'Orphaned Session',
+      running: false,
+      events: [{
+        type: 'user/message', seq: 8, time: 1,
+        data: {
+          source: { kind: 'user' },
+          content: [{ type: 'text', text: 'Wait for abandoned provider work.' }],
+        },
+      }],
+    }
+    let releaseModel: (() => void) | undefined
+    const modelBarrier = new Promise<void>((resolve) => { releaseModel = resolve })
+    let modelStarted = false
+    const digests = createSessionDigestModule({
+      inspect: async () => inspection,
+      generate: async (_request, signal) => {
+        modelStarted = true
+        await modelBarrier
+        signal.throwIfAborted()
+        return '{"overview":"unused","keyOutcomes":[],"openItems":[]}'
+      },
+      now: () => 285,
+    })
+    const caller = new AbortController()
+    const result = digests.generate(
+      { sessionId: 'orphaned', refresh: false },
+      caller.signal,
+    )
+    while (!modelStarted) await Promise.resolve()
+    caller.abort(new Error('caller departed'))
+    await expect(result).rejects.toMatchObject({ message: 'caller departed' })
+
+    let disposed = false
+    const disposal = digests.dispose().then(() => { disposed = true })
+    await new Promise(resolve => setImmediate(resolve))
+    expect(disposed).toBe(false)
+
+    releaseModel?.()
+    await disposal
+    expect(disposed).toBe(true)
+  })
+
+  it('aborts owned work, waits for quiescence, and rejects admission after disposal', async () => {
+    const inspection: SessionDigestInspection = {
+      title: 'Disposed Session',
+      running: false,
+      events: [{
+        type: 'user/message', seq: 7, time: 1,
+        data: {
+          source: { kind: 'user' },
+          content: [{ type: 'text', text: 'Do not outlive the plugin.' }],
+        },
+      }],
+    }
+    let modelSignal: AbortSignal | undefined
+    let releaseModel: (() => void) | undefined
+    const modelBarrier = new Promise<void>((resolve) => { releaseModel = resolve })
+    const digests = createSessionDigestModule({
+      inspect: async () => inspection,
+      generate: async (_request, signal) => {
+        modelSignal = signal
+        await modelBarrier
+        signal.throwIfAborted()
+        return '{"overview":"unused","keyOutcomes":[],"openItems":[]}'
+      },
+      now: () => 290,
+    })
+    const result = digests.generate(
+      { sessionId: 'disposed', refresh: false },
+      new AbortController().signal,
+    )
+    const outcome = result.then(value => value, error => error)
+    while (modelSignal === undefined) await Promise.resolve()
+
+    let disposed = false
+    const disposal = (digests as typeof digests & { dispose(): Promise<void> }).dispose()
+      .then(() => { disposed = true })
+    await Promise.resolve()
+    expect(modelSignal.aborted).toBe(true)
+    expect(disposed).toBe(false)
+
+    releaseModel?.()
+    await disposal
+    expect(await outcome).toMatchObject({ code: 'disposed' })
+    await expect(digests.generate(
+      { sessionId: 'disposed', refresh: false },
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: 'disposed' })
+  })
+
   it('reports invalid model output with a stable code and leaves the revision retryable', async () => {
     const inspection: SessionDigestInspection = {
       title: 'Retryable Session',

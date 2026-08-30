@@ -1,6 +1,9 @@
 /** Host-side atomic submission of one explicit Session Merge capture. */
 
-import type { SessionMergeProjection } from './session-merge-projection.ts'
+import {
+  sessionMergeMarkerOfEvent,
+  type SessionMergeProjection,
+} from './session-merge-projection.ts'
 import {
   containsSessionReferenceUri,
   type SessionMergeSubmission,
@@ -14,6 +17,8 @@ export class SessionMergeHostError extends Error {
   constructor(
     readonly code:
       | 'invalid-source-count'
+      | 'invalid-source'
+      | 'invalid-target'
       | 'duplicate-source'
       | 'cross-workspace-source'
       | 'source-resolution-mismatch'
@@ -39,9 +44,18 @@ function failureMessage(error: unknown, fallback: string): string {
 }
 
 /** Live target resolved by the Harness Session Controller. */
+export interface SessionMergeHostEvent {
+  readonly type: string
+  readonly data: unknown
+}
+
 export interface SessionMergeHostTarget {
   readonly targetSessionId: string
   readonly cwd: string
+  readonly parentSessionId?: string
+  readonly origin?: 'subagent'
+  readonly archived: boolean
+  readonly events: readonly SessionMergeHostEvent[]
   readonly handle: unknown
 }
 
@@ -50,6 +64,9 @@ export interface SessionMergeHostSource {
   readonly sessionId: string
   readonly cwd?: string
   readonly mention: string
+  readonly origin?: 'subagent'
+  readonly archived: boolean
+  readonly blank: boolean
 }
 
 /** Durable plugin marker paired with the resolver's reference context. */
@@ -90,7 +107,8 @@ export interface SessionMergeHostDependencies {
     sourceIds: readonly string[],
     signal: AbortSignal,
   ) => Promise<SessionMergeProjection>
-  readonly persist: (target: SessionMergeHostTarget) => Promise<void>
+  /** Durability commit; once admitted, caller cancellation no longer owns it. */
+  readonly commitCapture: (target: SessionMergeHostTarget) => Promise<void>
 }
 
 /** Public Host seam installed behind the package-owned Remote. */
@@ -99,6 +117,29 @@ export interface SessionMergeHostModule {
     request: SessionMergeSubmission,
     signal: AbortSignal,
   ): Promise<SessionMergeProjection>
+}
+
+function sameSources(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((sessionId, index) => sessionId === right[index])
+}
+
+function firstMergeSourceIds(
+  events: readonly SessionMergeHostEvent[],
+): readonly string[] | undefined {
+  for (const event of events) {
+    const marker = sessionMergeMarkerOfEvent(event)
+    if (marker !== undefined) return marker.sourceIds
+  }
+  return undefined
+}
+
+function targetAcceptsSources(
+  target: SessionMergeHostTarget,
+  sourceIds: readonly string[],
+): boolean {
+  const boundSources = firstMergeSourceIds(target.events)
+  if (boundSources !== undefined) return sameSources(boundSources, sourceIds)
+  return !target.events.some(event => event.type === 'turn/start')
 }
 
 /** Build the atomic Host capture workflow around Harness capabilities. */
@@ -154,6 +195,15 @@ export function createSessionMergeHostModule(
           'resolving',
         )
       }
+      signal.throwIfAborted()
+      if (target.parentSessionId !== undefined || target.origin === 'subagent'
+        || target.archived || target.cwd.trim() === '') {
+        throw new SessionMergeHostError(
+          'invalid-target',
+          'The Merge target must be independent, unarchived, non-Subagent, and have a working directory',
+          'resolving',
+        )
+      }
       const existing = dependencies.currentCapture(target)
       if (existing !== null) {
         if (existing.sources.length !== request.sourceIds.length
@@ -165,17 +215,13 @@ export function createSessionMergeHostModule(
             'resolving',
           )
         }
-        try {
-          await dependencies.persist(target)
-        } catch (error) {
-          if (signal.aborted) throw error
-          throw new SessionMergeHostError(
-            'persistence-failed',
-            failureMessage(error, 'Failed to persist Session Merge capture'),
-            'persisting',
-          )
-        }
-        return existing
+      }
+      if (existing === null && !targetAcceptsSources(target, request.sourceIds)) {
+        throw new SessionMergeHostError(
+          'invalid-target',
+          'The Merge target already contains a different established conversation',
+          'resolving',
+        )
       }
       let sources: SessionMergeHostSource[]
       try {
@@ -197,12 +243,33 @@ export function createSessionMergeHostModule(
           'resolving',
         )
       }
+      const invalidSource = sources.find(source =>
+        source.origin === 'subagent' || source.archived || source.blank)
+      if (invalidSource !== undefined) {
+        throw new SessionMergeHostError(
+          'invalid-source',
+          `Session ${JSON.stringify(invalidSource.sessionId)} is not a Canvas Session`,
+          'resolving',
+        )
+      }
       if (sources.some(source => source.cwd !== target.cwd)) {
         throw new SessionMergeHostError(
           'cross-workspace-source',
           'Session Merge sources must share the target working directory',
           'resolving',
         )
+      }
+      if (existing !== null) {
+        try {
+          await dependencies.commitCapture(target)
+        } catch (error) {
+          throw new SessionMergeHostError(
+            'persistence-failed',
+            failureMessage(error, 'Failed to persist Session Merge capture'),
+            'persisting',
+          )
+        }
+        return existing
       }
       try {
         dependencies.enqueue(target, {
@@ -250,9 +317,10 @@ export function createSessionMergeHostModule(
         )
       }
       try {
-        await dependencies.persist(target)
+        // The capture is already durable domain truth. From this admission
+        // point the commit must settle even if the Remote caller disconnects.
+        await dependencies.commitCapture(target)
       } catch (error) {
-        if (signal.aborted) throw error
         throw new SessionMergeHostError(
           'persistence-failed',
           failureMessage(error, 'Failed to persist Session Merge capture'),

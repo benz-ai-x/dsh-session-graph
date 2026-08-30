@@ -239,16 +239,18 @@ export function deriveSessionGraph(
   const children = new Map<string, string[]>()
   const edges: GraphEdge[] = []
   const clusters: ClusterInfo[] = []
-
-  const hasVisibleSessionParent = (row: SessionSummary): boolean => {
-    const parent = row.parentId !== undefined ? visible.get(row.parentId) : undefined
-    return parent !== undefined && parent.origin !== 'subagent'
+  const branchParent = new Map<SessionId, SessionId>()
+  const branchChildren = new Map<SessionId, SessionSummary[]>()
+  for (const row of visible.values()) {
+    if (row.origin === 'subagent' || row.parentId === undefined) continue
+    const parent = visible.get(row.parentId)
+    if (parent === undefined || parent.origin === 'subagent') continue
+    branchParent.set(row.id, parent.id)
+    const siblings = branchChildren.get(parent.id)
+    if (siblings === undefined) branchChildren.set(parent.id, [row])
+    else siblings.push(row)
   }
-
-  const branchChildrenOf = (row: SessionSummary): SessionSummary[] =>
-    [...visible.values()].filter(child =>
-      child.parentId === row.id && child.origin !== 'subagent',
-    ).sort(byRecency)
+  for (const siblings of branchChildren.values()) siblings.sort(byRecency)
 
   /** Recursively place one cluster member and collect the member ids beneath it. */
   const placeMember = (row: SessionSummary, clusterRootId: SessionId, members: SessionId[]): void => {
@@ -266,14 +268,13 @@ export function deriveSessionGraph(
       updatedAt: row.updatedAt,
       subagentCount: badge?.count ?? 0,
       runningSubagents: badge?.runningCount ?? 0,
-      branchFrom: row.parentId !== undefined && visible.get(row.parentId)?.origin !== 'subagent'
-        ? row.parentId
-        : undefined,
+      branchFrom: branchParent.get(row.id),
       mergeSources: row.projectionValues?.sessionGraphMerge?.sources ?? [],
     })
     members.push(row.id)
     const childKeys: string[] = []
-    for (const child of branchChildrenOf(row)) {
+    const branchRows = branchChildren.get(row.id) ?? []
+    for (const child of branchRows) {
       childKeys.push(child.id)
       edges.push({
         id: `branch:${row.id}->${child.id}`,
@@ -283,11 +284,11 @@ export function deriveSessionGraph(
       })
     }
     if (childKeys.length > 0) children.set(row.id, childKeys)
-    for (const child of branchChildrenOf(row)) placeMember(child, clusterRootId, members)
+    for (const child of branchRows) placeMember(child, clusterRootId, members)
   }
 
   const roots = [...visible.values()]
-    .filter(row => row.origin !== 'subagent' && !hasVisibleSessionParent(row))
+    .filter(row => row.origin !== 'subagent' && !branchParent.has(row.id))
     .sort(byRecency)
   for (const root of roots) {
     const members: SessionId[] = []

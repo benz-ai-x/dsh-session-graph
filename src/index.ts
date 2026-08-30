@@ -18,64 +18,26 @@ import {
 } from './session-digest.ts'
 import {
   sessionDigestInspectionFromHarness,
-  type SessionDigestRouteFallback,
 } from './session-digest-harness.ts'
+import {
+  resolveConfig,
+  type Config,
+  type ResolvedConfig,
+} from './config.ts'
 import { SESSION_MERGE_PROJECTION_DEFINITION } from './session-merge-projection.ts'
 import {
   SessionMergeHostError,
   type SessionMergeHostModule,
+  type SessionMergeHostStage,
 } from './session-merge-host.ts'
 import { createSessionMergeHarnessModule } from './session-merge-harness.ts'
 import type { SessionMergeSubmission } from './session-merge.ts'
 import type { SessionMergeProjection } from './session-merge-projection.ts'
 
-/** Optional auxiliary-model fallback and bounded output policy. */
-export interface Config {
-  readonly provider?: string
-  readonly model?: string
-  readonly maxOutputTokens?: number
-  readonly timeoutMs?: number
-}
-
-interface ResolvedConfig {
-  readonly route?: SessionDigestRouteFallback
-  readonly maxOutputTokens: number
-  readonly timeoutMs: number
-}
-
-const DEFAULT_MAX_OUTPUT_TOKENS = 800
-const DEFAULT_TIMEOUT_MS = 60_000
+export { Config, resolveConfig } from './config.ts'
 
 /** Eager Host services required by the read-only digest capability. */
 export const inject = ['sessionPersistence', 'llm']
-
-function positiveInteger(value: number | undefined, fallback: number, label: string): number {
-  const resolved = value ?? fallback
-  if (!Number.isSafeInteger(resolved) || resolved <= 0) {
-    throw new Error(`session-graph: ${label} must be a positive safe integer`)
-  }
-  return resolved
-}
-
-/** Validate the optional route pair without making it override logged Session routing. */
-export function resolveConfig(config: Config = {}): ResolvedConfig {
-  const provider = config.provider?.trim()
-  const model = config.model?.trim()
-  if ((provider === undefined) !== (model === undefined) || provider === '' || model === '') {
-    throw new Error('session-graph: provider and model must be configured together as non-empty strings')
-  }
-  return {
-    ...(provider === undefined || model === undefined
-      ? {}
-      : { route: { provider, model } }),
-    maxOutputTokens: positiveInteger(
-      config.maxOutputTokens,
-      DEFAULT_MAX_OUTPUT_TOKENS,
-      'maxOutputTokens',
-    ),
-    timeoutMs: positiveInteger(config.timeoutMs, DEFAULT_TIMEOUT_MS, 'timeoutMs'),
-  }
-}
 
 function promptFor(request: SessionDigestModelRequest): string {
   return JSON.stringify({
@@ -149,8 +111,44 @@ async function callDigestModel(
   return output
 }
 
+interface QuiescentRemoteService {
+  dispose(): Promise<void>
+}
+
+/** Publish one Remote whose work reaches quiescence before its registration disappears. */
+function provideQuiescentRemoteService<Service extends QuiescentRemoteService>(
+  ctx: Context,
+  create: (serviceCtx: Context) => Service,
+  label: string,
+): Promise<void> {
+  let readiness: Promise<void> | undefined
+  ctx.effect(function* () {
+    let service: Service | undefined
+    const fiber = ctx.plugin({
+      name: label,
+      apply(serviceCtx: Context) {
+        service = create(serviceCtx)
+      },
+    })
+    readiness = Promise.resolve(fiber).then(() => {})
+    // Cordis disposes one effect's yielded resources serially in reverse order.
+    // Collect the provider Fiber first so quiescence runs while it remains active.
+    yield fiber.dispose
+    yield async () => {
+      try {
+        await fiber
+      } catch {
+        // Startup errors already reject readiness; cleanup must still reach the Fiber.
+      }
+      await service?.dispose()
+    }
+  }, label)
+  if (readiness === undefined) throw new Error(`Failed to install ${label}`)
+  return readiness
+}
+
 /** Package-owned Host service addressed by the browser contribution. */
-export class SessionGraphDigestService extends TypertRemoteService {
+export class SessionGraphDigestService extends TypertRemoteService implements QuiescentRemoteService {
   private readonly digests: SessionDigestModule
 
   constructor(ctx: Context, config: ResolvedConfig) {
@@ -163,6 +161,10 @@ export class SessionGraphDigestService extends TypertRemoteService {
       generate: async (request, signal) => await callDigestModel(ctx, config, request, signal),
       now: Date.now,
     })
+    ctx.effect(
+      () => async () => { await this.dispose() },
+      'session-graph.digest-quiescence',
+    )
   }
 
   @Remote('generate')
@@ -179,37 +181,90 @@ export class SessionGraphDigestService extends TypertRemoteService {
       throw new TypertRemoteFailure({ code, message, details: {} })
     }
   }
+
+  dispose(): Promise<void> {
+    return this.digests.dispose()
+  }
 }
 
 /** Package-owned Host service that submits one durable Session Merge capture. */
-export class SessionGraphMergeService extends TypertRemoteService {
+export class SessionGraphMergeService extends TypertRemoteService implements QuiescentRemoteService {
   private readonly merges: SessionMergeHostModule
+  private readonly lifecycle = new AbortController()
+  private readonly activeCalls = new Set<Promise<SessionMergeProjection>>()
+  private disposed = false
+  private disposal: Promise<void> | undefined
 
   constructor(ctx: Context) {
     super(ctx, 'sessionGraphMerge')
     this.merges = createSessionMergeHarnessModule(ctx)
+    ctx.effect(
+      () => async () => { await this.dispose() },
+      'session-graph.merge-quiescence',
+    )
   }
 
-  @Remote('submit')
-  async submit(
+  private disposedFailure(stage: SessionMergeHostStage): TypertRemoteFailure {
+    return new TypertRemoteFailure({
+      code: 'disposed',
+      message: 'Session Merge service is disposed',
+      details: { stage },
+    })
+  }
+
+  private async submitAdmitted(
     request: SessionMergeSubmission,
+    callerSignal: AbortSignal,
     signal: AbortSignal,
   ): Promise<SessionMergeProjection> {
     try {
       return await this.merges.submit(request, signal)
     } catch (error) {
-      if (signal.aborted) throw error
-      const code = error instanceof SessionMergeHostError ? error.code : 'merge-submit-failed'
       const stage = error instanceof SessionMergeHostError ? error.stage : 'capturing'
+      if (callerSignal.aborted && stage !== 'persisting') throw error
+      if (this.lifecycle.signal.aborted && stage !== 'persisting') {
+        throw this.disposedFailure(stage)
+      }
+      const code = error instanceof SessionMergeHostError ? error.code : 'merge-submit-failed'
       const message = error instanceof Error ? error.message : 'Session Merge submission failed'
       throw new TypertRemoteFailure({ code, message, details: { stage } })
     }
   }
+
+  @Remote('submit')
+  submit(
+    request: SessionMergeSubmission,
+    callerSignal: AbortSignal,
+  ): Promise<SessionMergeProjection> {
+    if (this.disposed) return Promise.reject(this.disposedFailure('resolving'))
+    const signal = AbortSignal.any([callerSignal, this.lifecycle.signal])
+    const call = this.submitAdmitted(request, callerSignal, signal)
+    this.activeCalls.add(call)
+    void call.then(
+      () => { this.activeCalls.delete(call) },
+      () => { this.activeCalls.delete(call) },
+    )
+    return call
+  }
+
+  dispose(): Promise<void> {
+    if (this.disposal !== undefined) return this.disposal
+    this.disposed = true
+    this.lifecycle.abort(new Error('Session Merge service is disposed'))
+    const admitted = [...this.activeCalls]
+    this.disposal = Promise.allSettled(admitted).then(() => {})
+    return this.disposal
+  }
 }
 
 /** Install the digest service, Merge projection, and deferred Merge submission service. */
-export function apply(ctx: Context, config: Config = {}): void {
-  new SessionGraphDigestService(ctx, resolveConfig(config))
+export async function apply(ctx: Context, config: Config = {}): Promise<void> {
+  const resolvedConfig = resolveConfig(config)
+  const digestReady = provideQuiescentRemoteService(
+    ctx,
+    serviceCtx => new SessionGraphDigestService(serviceCtx, resolvedConfig),
+    'session-graph.digest-service',
+  )
   void ctx.inject(['sessionProjections'], projectionCtx => {
     projectionCtx.sessionProjections.register(SESSION_MERGE_PROJECTION_DEFINITION)
   })
@@ -218,7 +273,13 @@ export function apply(ctx: Context, config: Config = {}): void {
     'sessionReferenceResolver',
     'sessionProjections',
     'sessionProjectionCache',
-  ], mergeCtx => {
-    new SessionGraphMergeService(mergeCtx)
+    'workspaceRegistry',
+  ], async mergeCtx => {
+    await provideQuiescentRemoteService(
+      mergeCtx,
+      serviceCtx => new SessionGraphMergeService(serviceCtx),
+      'session-graph.merge-service',
+    )
   })
+  await digestReady
 }

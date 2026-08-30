@@ -54,7 +54,7 @@ describe('Session Graph Host integration', () => {
     await ctx.plugin(SessionProjectionRegistry)
     ctx.provide('sessionPersistence', { inspect: async () => ({ meta: {}, events: [] }) })
     ctx.provide('llm', { async *stream() {} })
-    apply(ctx)
+    await apply(ctx)
     await new Promise(resolve => setImmediate(resolve))
     await ctx.plugin(SessionProjectionCache, {
       writeEveryEvents: 100,
@@ -98,7 +98,7 @@ describe('Session Graph Host integration', () => {
         yield { type: 'finish', reason: { kind: 'stop' } }
       },
     })
-    apply(ctx)
+    await apply(ctx)
     const service = ctx.get('sessionGraphDigest') as {
       generate: (
         request: { readonly sessionId: string; readonly refresh: boolean },
@@ -138,6 +138,68 @@ describe('Session Graph Host integration', () => {
     expect(calls).toHaveLength(1)
   })
 
+  it('aborts and joins Session Digest work before Host disposal completes', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    let releaseModel: (() => void) | undefined
+    const modelBarrier = new Promise<void>((resolve) => { releaseModel = resolve })
+    let modelSignal: AbortSignal | undefined
+    ctx.provide('sessionPersistence', {
+      inspect: async (sessionId: SessionId) => ({
+        meta: { id: sessionId },
+        events: [{
+          type: 'user/message',
+          seq: 0,
+          time: 1,
+          data: {
+            source: { kind: 'user' },
+            content: [{ type: 'text', text: 'Wait for plugin disposal.' }],
+          },
+        }],
+      }),
+    })
+    ctx.provide('llm', {
+      async *stream(options: Readonly<Record<string, unknown>>) {
+        modelSignal = options.signal as AbortSignal
+        await modelBarrier
+        modelSignal.throwIfAborted()
+      },
+    })
+    await apply(ctx, { provider: 'provider', model: 'model' })
+    const service = ctx.get('sessionGraphDigest') as {
+      generate: (
+        request: { readonly sessionId: string; readonly refresh: boolean },
+        signal: AbortSignal,
+      ) => Promise<unknown>
+    }
+    const result = service.generate(
+      { sessionId: 'dispose-session', refresh: false },
+      new AbortController().signal,
+    ).then(value => value, error => error)
+    while (modelSignal === undefined) await Promise.resolve()
+
+    let disposed = false
+    const disposal = ctx.fiber.dispose().then(() => { disposed = true })
+    await new Promise(resolve => setImmediate(resolve))
+    const modelAbortedDuringDisposal = modelSignal.aborted
+    const disposalSettledBeforeModel = disposed
+    const disposalService = ctx.get('sessionGraphDigest') as typeof service | undefined
+    const servicePublishedDuringDisposal = disposalService !== undefined
+    const lateRequest = disposalService?.generate(
+      { sessionId: 'late-session', refresh: false },
+      new AbortController().signal,
+    ).then(value => value, error => error) ?? Promise.resolve(undefined)
+
+    releaseModel?.()
+    await disposal
+    expect(modelAbortedDuringDisposal).toBe(true)
+    expect(disposalSettledBeforeModel).toBe(false)
+    expect(servicePublishedDuringDisposal).toBe(true)
+    expect(await lateRequest).toMatchObject({ failure: { code: 'disposed' } })
+    expect(await result).toMatchObject({ failure: { code: 'disposed' } })
+    expect(ctx.get('sessionGraphDigest')).toBeUndefined()
+  })
+
   it('registers the durable Session Merge projection with the Harness registry', async () => {
     const ctx = new Context()
     contexts.push(ctx)
@@ -146,7 +208,7 @@ describe('Session Graph Host integration', () => {
     ctx.provide('sessionPersistence', { inspect: async () => ({ meta: {}, events: [] }) })
     ctx.provide('llm', { async *stream() {} })
 
-    apply(ctx)
+    await apply(ctx)
     await Promise.resolve()
     const session = ctx.sessions.create()
     session.append('step/start', { turn: 1, step: 1 })
@@ -255,7 +317,7 @@ describe('Session Graph Host integration', () => {
       ],
     }
     let projection: typeof capture | null = null
-    const targetSession = { header: { cwd: '/workspace' } }
+    const targetSession = { header: { cwd: '/workspace' }, events: [] }
     const agent = {
       id: id('target-session'),
       session: targetSession,
@@ -272,6 +334,10 @@ describe('Session Graph Host integration', () => {
     ctx.provide('llm', { async *stream() {} })
     ctx.provide('sessionController', {
       resolveAgent: async () => ({ agent }),
+      inspect: async (sessionId: SessionId) => ({
+        meta: { id: sessionId, cwd: '/workspace' },
+        events: [{ type: 'turn/start', data: { turn: 1 } }],
+      }),
     })
     ctx.provide('sessionReferenceResolver', {
       remoteExportCandidates: async (_agent: unknown, query: string) => [{
@@ -291,8 +357,9 @@ describe('Session Graph Host integration', () => {
       onChanged: () => () => {},
     })
     ctx.provide('sessionProjectionCache', { write })
+    ctx.provide('workspaceRegistry', { archivedSessionIds: [] })
 
-    apply(ctx)
+    await apply(ctx)
     await new Promise(resolve => setImmediate(resolve))
     const service = ctx.get('sessionGraphMerge') as {
       submit: (request: Readonly<Record<string, unknown>>, signal: AbortSignal) => Promise<unknown>
@@ -326,6 +393,220 @@ describe('Session Graph Host integration', () => {
     expect(write).toHaveBeenCalledWith(targetSession)
   })
 
+  it('aborts pre-commit Merge work and stays published until Host-owned commit settles', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    const capture = {
+      operationId: 'operation-1',
+      contextEventSeq: 8,
+      sources: [
+        { sessionId: 'source-a', capturedThroughSeq: 3 },
+        { sessionId: 'source-b', capturedThroughSeq: 4 },
+      ],
+    }
+    let projection: typeof capture | null = null
+    const targetSession = { header: { cwd: '/workspace' }, events: [] }
+    const waitingTargetSession = { header: { cwd: '/workspace' }, events: [] }
+    const agent = {
+      id: id('target-session'),
+      session: targetSession,
+      inject: () => {},
+      steer: () => { projection = capture },
+    }
+    const waitingAgent = {
+      id: id('waiting-target'),
+      session: waitingTargetSession,
+      inject: () => {},
+      steer: () => {},
+    }
+    let startCaptureWait: (() => void) | undefined
+    const captureWaitStarted = new Promise<void>((resolve) => { startCaptureWait = resolve })
+    let captureListenerDisposed = false
+    let startCommit: (() => void) | undefined
+    const commitStarted = new Promise<void>((resolve) => { startCommit = resolve })
+    let releaseCommit: (() => void) | undefined
+    const commitBarrier = new Promise<void>((resolve) => { releaseCommit = resolve })
+    ctx.provide('sessionPersistence', { inspect: async () => ({ meta: {}, events: [] }) })
+    ctx.provide('llm', { async *stream() {} })
+    ctx.provide('sessionController', {
+      resolveAgent: async (sessionId: SessionId) => ({
+        agent: sessionId === id('waiting-target') ? waitingAgent : agent,
+      }),
+      inspect: async (sessionId: SessionId) => ({
+        meta: { id: sessionId, cwd: '/workspace' },
+        events: [{ type: 'turn/start', data: { turn: 1 } }],
+      }),
+    })
+    ctx.provide('sessionReferenceResolver', {
+      remoteExportCandidates: async (_agent: unknown, query: string) => [{
+        sessionId: query,
+        label: query,
+        cwd: '/workspace',
+        sameWorkspace: true,
+        createdAt: 0,
+        mention: `@[${query}](dsh-session:${query})`,
+      }],
+    })
+    ctx.provide('sessionProjections', {
+      register: () => () => {},
+      stateOf: (session: unknown) => session !== targetSession || projection === null
+        ? { inStep: false, marker: null, value: null }
+        : { inStep: true, marker: null, value: projection },
+      onChanged: () => {
+        startCaptureWait?.()
+        return () => { captureListenerDisposed = true }
+      },
+    })
+    ctx.provide('sessionProjectionCache', {
+      write: async () => {
+        startCommit?.()
+        await commitBarrier
+      },
+    })
+    ctx.provide('workspaceRegistry', { archivedSessionIds: [] })
+
+    await apply(ctx)
+    await new Promise(resolve => setImmediate(resolve))
+    const service = ctx.get('sessionGraphMerge') as {
+      submit: (request: Readonly<Record<string, unknown>>, signal: AbortSignal) => Promise<unknown>
+    }
+    const request = {
+      targetSessionId: 'target-session',
+      sourceIds: ['source-a', 'source-b'],
+      instruction: 'Compare conclusions.',
+      operationId: 'operation-1',
+    }
+    const waitingController = new AbortController()
+    let waitingSettled = false
+    let waitingOutcome: unknown
+    const waitingResult = service.submit({
+      ...request,
+      targetSessionId: 'waiting-target',
+      operationId: 'waiting-operation',
+    }, waitingController.signal).then(
+      value => {
+        waitingSettled = true
+        waitingOutcome = value
+      },
+      error => {
+        waitingSettled = true
+        waitingOutcome = error
+      },
+    )
+    await captureWaitStarted
+    const result = service.submit(request, new AbortController().signal)
+    await commitStarted
+
+    let disposed = false
+    const disposal = ctx.fiber.dispose().then(() => { disposed = true })
+    await new Promise(resolve => setImmediate(resolve))
+    const disposalSettledBeforeCommit = disposed
+    const preCommitAbortedDuringDisposal = waitingSettled
+    const captureListenerRemovedDuringDisposal = captureListenerDisposed
+    const disposalService = ctx.get('sessionGraphMerge') as typeof service | undefined
+    const servicePublishedDuringCommit = disposalService !== undefined
+    const lateRequest = disposalService?.submit({ ...request, operationId: 'late-operation' },
+      new AbortController().signal).then(value => value, error => error)
+      ?? Promise.resolve(undefined)
+
+    waitingController.abort(new Error('test cleanup'))
+    releaseCommit?.()
+    await expect(result).resolves.toEqual(capture)
+    await waitingResult
+    await disposal
+    expect(disposalSettledBeforeCommit).toBe(false)
+    expect(preCommitAbortedDuringDisposal).toBe(true)
+    expect(captureListenerRemovedDuringDisposal).toBe(true)
+    expect(servicePublishedDuringCommit).toBe(true)
+    expect(waitingOutcome).toMatchObject({ failure: { code: 'disposed' } })
+    expect(await lateRequest).toMatchObject({ failure: { code: 'disposed' } })
+    expect(ctx.get('sessionGraphMerge')).toBeUndefined()
+  })
+
+  it('derives source qualification from Host Session and Workspace truth', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    ctx.provide('sessionController', {
+      resolveAgent: async () => ({ error: { message: 'unused' } }),
+      inspect: async (sessionId: SessionId) => ({
+        meta: {
+          id: sessionId,
+          cwd: '/workspace',
+          origin: 'subagent' as const,
+        },
+        events: [],
+      }),
+    })
+    ctx.provide('sessionReferenceResolver', {
+      remoteExportCandidates: async (_agent: unknown, query: string) => [{
+        sessionId: id(query),
+        cwd: '/workspace',
+        mention: `@[${query}](dsh-session:${query})`,
+      }],
+    })
+    ctx.provide('workspaceRegistry', { archivedSessionIds: [id('source-a')] })
+    const dependencies = sessionMergeDependenciesFromHarness(ctx)
+
+    const source = await dependencies.resolveSource({
+      targetSessionId: 'target-session',
+      cwd: '/workspace',
+      archived: false,
+      events: [],
+      handle: {
+        id: id('target-session'),
+        session: { header: { cwd: '/workspace' }, events: [] },
+        inject: () => {},
+        steer: () => {},
+      },
+    }, 'source-a', new AbortController().signal)
+
+    expect(source).toEqual({
+      sessionId: 'source-a',
+      cwd: '/workspace',
+      mention: '@[source-a](dsh-session:source-a)',
+      origin: 'subagent',
+      archived: true,
+      blank: true,
+    })
+  })
+
+  it('derives target lineage qualification from the Host Session header', async () => {
+    const ctx = new Context()
+    contexts.push(ctx)
+    const targetSession = {
+      header: {
+        cwd: '/workspace',
+        parentSession: id('parent-session'),
+      },
+      events: [{ type: 'turn/start', data: { turn: 1 } }],
+    }
+    const agent = {
+      id: id('target-session'),
+      session: targetSession,
+      inject: () => {},
+      steer: () => {},
+    }
+    ctx.provide('sessionController', {
+      resolveAgent: async () => ({ agent }),
+    })
+    ctx.provide('workspaceRegistry', { archivedSessionIds: [] })
+    const dependencies = sessionMergeDependenciesFromHarness(ctx)
+
+    const target = await dependencies.resolveTarget(
+      'target-session',
+      new AbortController().signal,
+    )
+
+    expect(target).toMatchObject({
+      targetSessionId: 'target-session',
+      cwd: '/workspace',
+      parentSessionId: 'parent-session',
+      archived: false,
+      events: targetSession.events,
+    })
+    expect(target.handle).toBe(agent)
+  })
+
   it('bounds capture waiting when the target produces neither a projection nor an error', async () => {
     vi.useFakeTimers()
     const ctx = new Context()
@@ -340,9 +621,11 @@ describe('Session Graph Host integration', () => {
     void dependencies.waitForCapture({
       targetSessionId: 'target-session',
       cwd: '/workspace',
+      archived: false,
+      events: [],
       handle: {
         id: id('target-session'),
-        session: { header: { cwd: '/workspace' } },
+        session: { header: { cwd: '/workspace' }, events: [] },
         inject: () => {},
         steer: () => {},
       },
@@ -380,6 +663,8 @@ describe('Session Graph Host integration', () => {
     void dependencies.waitForCapture({
       targetSessionId: 'target-session',
       cwd: '/workspace',
+      archived: false,
+      events: [],
       handle: {
         id: id('target-session'),
         session: targetSession,
