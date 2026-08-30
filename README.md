@@ -1,17 +1,55 @@
 ---
-description: "Installable dsh Web plugin for browsing, arranging, branching, merging, and digesting related workspace sessions on a free canvas."
+description: "Visual DeepSeek Harness Web plugin for exploring session lineage, arranging branches, merging snapshots, and generating digests on an interactive graph canvas."
 kind: "package-bundle"
 ---
 
-# @benz-ai-x/dsh-client-ui-session-graph
+# Session Graph for DeepSeek Harness
+
+[![CI](https://github.com/benz-ai-x/dsh-session-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/benz-ai-x/dsh-session-graph/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/%40benz-ai-x%2Fdsh-client-ui-session-graph?logo=npm)](https://www.npmjs.com/package/@benz-ai-x/dsh-client-ui-session-graph)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 English | [中文](README.zh.md)
 
-This package adds a **Graph** tab to the DeepSeek Harness conversation view. It groups Branch-connected Canvas Sessions into movable, collapsible Session Clusters, draws Branch and Merge relations as directed edges, and folds Subagent Sessions into Subagent Summaries. The browser stores each Session Arrangement by graph scope. Browsing, arranging, and digesting never change a Session log; **New branch** and **Merge sessions** are explicit Harness-owned creation workflows.
+**Visualize, navigate, branch, merge, and summarize related AI agent sessions without leaving DeepSeek Harness.**
+
+`@benz-ai-x/dsh-client-ui-session-graph` adds an interactive **Graph** tab to the DeepSeek Harness Web conversation view. It turns Session Lineage into a free canvas: Branch-connected Canvas Sessions form movable clusters, Merge Sessions retain snapshot provenance, Subagent Sessions fold into compact summaries, and on-demand Session Digests surface outcomes and open work. Browsing, arranging, and digesting never mutate a Session log.
+
+<p align="center">
+  <a href="docs/assets/session-graph-overview.png">
+    <img src="https://raw.githubusercontent.com/benz-ai-x/dsh-session-graph/main/docs/assets/session-graph-overview.png" alt="Session Graph for DeepSeek Harness showing branches, merge relations, subagent summaries, filters, and canvas controls" width="100%" />
+  </a>
+</p>
+
+<p align="center"><sub>Real Session Graph UI rendered with synthetic demo sessions.</sub></p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@benz-ai-x/dsh-client-ui-session-graph">npm</a> ·
+  <a href="https://github.com/benz-ai-x/dsh-session-graph/releases">Releases</a> ·
+  <a href="https://github.com/benz-ai-x/dsh-session-graph/issues">Issues</a> ·
+  <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a>
+</p>
+
+## Quick start
+
+```sh
+dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
+```
+
+Restart the `web` profile, open a non-blank Session, and choose **Graph**. The current release targets DeepSeek Harness `0.1.2-alpha.1` and requires Node.js `^22.19.0 || >=24.0.0`.
+
+## What it adds
+
+| Capability | What you get |
+|---|---|
+| Visual Session Graph | Branch Lineage, Merge provenance, Session Clusters, and folded Subagent activity in one view |
+| Interactive canvas | Drag, snap, collapse, filter, zoom, pan, fit, relayout, reset, locate, and minimap controls |
+| Cross-session workflows | Open or branch any Canvas Session and merge immutable snapshots from two or three sources |
+| Read-only Session Digests | Generate concise overviews, key outcomes, and open items on demand without changing Session logs |
 
 ## Install
 
-After the package is published to npm, add it to the `web` profile:
+Install the published npm package into the `web` profile:
 
 ```sh
 dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
@@ -35,7 +73,7 @@ dsh plugin --profile web remove @benz-ai-x/dsh-client-ui-session-graph
 
 Restart the target `web` profile after installation or removal. A running process does not watch its profile dependency list.
 
-The first release targets DeepSeek Harness `0.1.2-alpha.1`. The plugin intentionally does not install that Harness checkout's unpublished `@deepseek-ai/*` packages into its own dependency tree; its Session persistence, LLM, Remote, and browser runtime services belong to the selected dsh profile.
+The current `0.1.x` line targets DeepSeek Harness `0.1.2-alpha.1`. The plugin intentionally does not install that Harness checkout's unpublished `@deepseek-ai/*` packages into its own dependency tree; its Session persistence, LLM, Remote, and browser runtime services belong to the selected dsh profile.
 
 ## Use the graph
 

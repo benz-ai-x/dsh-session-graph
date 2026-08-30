@@ -1,17 +1,55 @@
 ---
-description: "可安装的 dsh Web 插件，用自由画布浏览、排列、分支、汇聚并总结相关工作区会话。"
+description: "DeepSeek Harness 可视化 Web 插件：在交互式图谱画布中浏览会话谱系、排列分支、汇聚快照并生成摘要。"
 kind: "package-bundle"
 ---
 
-# @benz-ai-x/dsh-client-ui-session-graph
+# DeepSeek Harness Session Graph
+
+[![CI](https://github.com/benz-ai-x/dsh-session-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/benz-ai-x/dsh-session-graph/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/%40benz-ai-x%2Fdsh-client-ui-session-graph?logo=npm)](https://www.npmjs.com/package/@benz-ai-x/dsh-client-ui-session-graph)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [English](README.md) | 中文
 
-本包为 DeepSeek Harness 对话视图添加 **Graph** 标签。它把通过 Branch（分支）连接的 Canvas Session（画布会话）组织成可移动、可折叠的 Session Cluster（会话簇），以有向边绘制 Branch 与 Merge Relation（汇聚关系），并把 Subagent Session（子代理会话）折叠为 Subagent Summary（子代理摘要）。浏览器按图谱范围保存每份 Session Arrangement（会话排列）。浏览、排列与生成摘要不会改变 Session 日志；“开新分支”和“汇聚会话”则是显式交给 Harness 执行的创建流程。
+**无需离开 DeepSeek Harness，即可可视化、浏览、分支、汇聚并总结相关 AI Agent 会话。**
+
+`@benz-ai-x/dsh-client-ui-session-graph` 为 DeepSeek Harness Web 对话视图添加交互式 **Graph** 标签，把 Session Lineage（会话谱系）变成自由画布：Branch 连接的 Canvas Session 组成可移动会话簇，Merge Session 保留快照溯源，Subagent Session 折叠为紧凑摘要，并可按需生成 Session Digest。浏览、排列与生成摘要都不会修改 Session 日志。
+
+<p align="center">
+  <a href="docs/assets/session-graph-overview.png">
+    <img src="https://raw.githubusercontent.com/benz-ai-x/dsh-session-graph/main/docs/assets/session-graph-overview.png" alt="DeepSeek Harness Session Graph，展示分支、汇聚关系、子代理摘要、标题过滤和画布控制" width="100%" />
+  </a>
+</p>
+
+<p align="center"><sub>使用合成演示会话渲染的真实 Session Graph 界面。</sub></p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@benz-ai-x/dsh-client-ui-session-graph">npm</a> ·
+  <a href="https://github.com/benz-ai-x/dsh-session-graph/releases">版本发布</a> ·
+  <a href="https://github.com/benz-ai-x/dsh-session-graph/issues">问题反馈</a> ·
+  <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a>
+</p>
+
+## 快速开始
+
+```sh
+dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
+```
+
+重启 `web` profile，打开任意非空 Session，然后选择 **Graph**。当前版本面向 DeepSeek Harness `0.1.2-alpha.1`，需要 Node.js `^22.19.0 || >=24.0.0`。
+
+## 核心能力
+
+| 能力 | 你可以获得 |
+|---|---|
+| 可视化 Session Graph | 在同一视图查看 Branch Lineage、Merge 溯源、Session Cluster 与折叠的 Subagent 活动 |
+| 交互式画布 | 拖动、吸附、折叠、过滤、缩放、平移、适应、重新布局、重置、定位与 minimap |
+| 跨会话工作流 | 打开任意 Canvas Session、创建 Branch，并汇聚两到三个来源的不可变快照 |
+| 只读 Session Digest | 按需生成简短概览、关键结论和待办，且不改变 Session 日志 |
 
 ## 安装
 
-本包发布到 npm 后，可将其加入 `web` profile：
+从 npm 安装已发布的包，并将其加入 `web` profile：
 
 ```sh
 dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
@@ -35,7 +73,7 @@ dsh plugin --profile web remove @benz-ai-x/dsh-client-ui-session-graph
 
 安装或移除后请重启目标 `web` profile。运行中的进程不会监视 profile 依赖列表。
 
-首个版本面向 DeepSeek Harness `0.1.2-alpha.1`。插件不会把该 Harness checkout 中尚未单独发布的 `@deepseek-ai/*` 包安装进自己的依赖树；Session 持久化、LLM、Remote 与浏览器运行时服务统一由所选 dsh profile 持有。
+当前 `0.1.x` 版本线面向 DeepSeek Harness `0.1.2-alpha.1`。插件不会把该 Harness checkout 中尚未单独发布的 `@deepseek-ai/*` 包安装进自己的依赖树；Session 持久化、LLM、Remote 与浏览器运行时服务统一由所选 dsh profile 持有。
 
 ## 使用图谱
 
