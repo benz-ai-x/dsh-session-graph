@@ -4,7 +4,8 @@
  * offsets, and collapsed cluster roots as one record. Reads fail soft — a
  * corrupt or foreign payload yields undefined and the view falls back to
  * the auto layout — while writes replace the whole scope record (removed
- * sessions and expanded clusters drop out on the next save).
+ * sessions and expanded clusters drop out on the next save). Browser storage
+ * denial and quota failures are presentation failures and never break the view.
  * @module @benz-ai-x/dsh-client-ui-session-graph/src/client/layout-store
  */
 
@@ -58,11 +59,11 @@ function storageKey(scopeKey: string): string {
  */
 export function loadLayout(
   scopeKey: string,
-  storage: Storage = globalThis.localStorage,
+  storage?: Storage,
 ): LayoutState | undefined {
-  const raw = storage.getItem(storageKey(scopeKey))
-  if (raw === null) return undefined
   try {
+    const raw = (storage ?? globalThis.localStorage).getItem(storageKey(scopeKey))
+    if (raw === null) return undefined
     const parsed: unknown = JSON.parse(raw)
     if (typeof parsed !== 'object' || parsed === null) return undefined
     const { v, positions: rawPositions, collapsed, offsets: rawOffsets } = parsed as {
@@ -114,15 +115,23 @@ export function loadLayout(
 export function saveLayout(
   scopeKey: string,
   state: LayoutState,
-  storage: Storage = globalThis.localStorage,
+  storage?: Storage,
 ): void {
-  const record: LayoutRecord = {
-    v: 1,
-    positions: { ...state.positions },
-    collapsed: [...state.collapsed],
-    offsets: { ...state.offsets },
+  try {
+    const record: LayoutRecord = {
+      v: 1,
+      positions: { ...state.positions },
+      collapsed: [...state.collapsed],
+      offsets: { ...state.offsets },
+    }
+    const backend = storage ?? globalThis.localStorage
+    backend.setItem(
+      storageKey(scopeKey),
+      JSON.stringify(record),
+    )
+  } catch {
+    // The live arrangement remains usable even when persistence is denied or full.
   }
-  storage.setItem(storageKey(scopeKey), JSON.stringify(record))
 }
 
 /**
@@ -135,7 +144,7 @@ export function saveLayout(
  */
 export function loadArrangement(
   identity: SessionArrangementIdentity,
-  storage: Storage = globalThis.localStorage,
+  storage?: Storage,
 ): LayoutState | undefined {
   const identified = loadLayout(identity.key, storage)
   if (identified !== undefined || identity.legacyKey === undefined) return identified
