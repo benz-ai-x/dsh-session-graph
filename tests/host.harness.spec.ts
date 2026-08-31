@@ -25,6 +25,16 @@ import { sessionMergeDependenciesFromHarness } from '../src/session-merge-harnes
 
 const id = (value: string): SessionId => value as SessionId
 
+function remoteFailureOf(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Readonly<Record<string, unknown>>
+  if (typeof record.code === 'string') return record
+  const failure = record.failure
+  return failure !== null && typeof failure === 'object' && !Array.isArray(failure)
+    ? failure as Readonly<Record<string, unknown>>
+    : undefined
+}
+
 describe('Session Graph Host integration', () => {
   const contexts: Context[] = []
   const roots: string[] = []
@@ -195,8 +205,8 @@ describe('Session Graph Host integration', () => {
     expect(modelAbortedDuringDisposal).toBe(true)
     expect(disposalSettledBeforeModel).toBe(false)
     expect(servicePublishedDuringDisposal).toBe(true)
-    expect(await lateRequest).toMatchObject({ failure: { code: 'disposed' } })
-    expect(await result).toMatchObject({ failure: { code: 'disposed' } })
+    expect(remoteFailureOf(await lateRequest)).toMatchObject({ code: 'disposed' })
+    expect(remoteFailureOf(await result)).toMatchObject({ code: 'disposed' })
     expect(ctx.get('sessionGraphDigest')).toBeUndefined()
   })
 
@@ -518,8 +528,8 @@ describe('Session Graph Host integration', () => {
     expect(preCommitAbortedDuringDisposal).toBe(true)
     expect(captureListenerRemovedDuringDisposal).toBe(true)
     expect(servicePublishedDuringCommit).toBe(true)
-    expect(waitingOutcome).toMatchObject({ failure: { code: 'disposed' } })
-    expect(await lateRequest).toMatchObject({ failure: { code: 'disposed' } })
+    expect(remoteFailureOf(waitingOutcome)).toMatchObject({ code: 'disposed' })
+    expect(remoteFailureOf(await lateRequest)).toMatchObject({ code: 'disposed' })
     expect(ctx.get('sessionGraphMerge')).toBeUndefined()
   })
 

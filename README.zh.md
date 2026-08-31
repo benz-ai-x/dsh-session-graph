@@ -36,7 +36,7 @@ kind: "package-bundle"
 dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
 ```
 
-重启 `web` profile，打开任意非空 Session，然后选择 **Graph**。当前版本面向 DeepSeek Harness `0.1.2-alpha.1`，需要 Node.js `^22.19.0 || >=24.0.0`。
+重启 `web` profile，打开任意非空 Session，然后选择 **Graph**。当前版本支持 DeepSeek Harness `0.1.2-alpha.1` 与 `0.1.2-alpha.2`，需要 Node.js `^22.19.0 || >=24.0.0`。
 
 ## 核心能力
 
@@ -58,7 +58,7 @@ dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
 若要直接从 GitHub 安装已打 tag 的源码：
 
 ```sh
-dsh plugin --profile web add github:benz-ai-x/dsh-session-graph#v0.1.3
+dsh plugin --profile web add github:benz-ai-x/dsh-session-graph#v0.1.5
 ```
 
 profile 显式授权前，pnpm 会阻止 git 依赖执行 `prepare` 脚本。首次 GitHub 安装会以 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` 退出；把 dsh 打印的完整键复制到 `$DSH_HOME/profiles/web/pnpm-workspace.yaml` 的 `allowBuilds` 下，再次执行命令。这项权限允许包代码在 agent 沙箱之外执行，因此应先检查源码，并锁定 tag 或 commit。
@@ -73,7 +73,7 @@ dsh plugin --profile web remove @benz-ai-x/dsh-client-ui-session-graph
 
 安装或移除后请重启目标 `web` profile。运行中的进程不会监视 profile 依赖列表。
 
-当前 `0.1.x` 版本线面向 DeepSeek Harness `0.1.2-alpha.1`。插件不会把该 Harness checkout 中尚未单独发布的 `@deepseek-ai/*` 包安装进自己的依赖树；Session 持久化、LLM、Remote 与浏览器运行时服务统一由所选 dsh profile 持有。
+当前 `0.1.x` 版本线支持 DeepSeek Harness `0.1.2-alpha.1` 与 `0.1.2-alpha.2`，Host 入口会适配这次版本转换前后的两套 Remote failure API。插件不会把这些 Harness checkout 中尚未单独发布的 `@deepseek-ai/*` 包安装进自己的依赖树；Session 持久化、LLM、Remote 与浏览器运行时服务统一由所选 dsh profile 持有。
 
 ## 使用图谱
 
@@ -148,7 +148,7 @@ pnpm run check
 DSH_HARNESS_ROOT=/path/to/deepseek-harness pnpm test:harness
 ```
 
-CI 会在 Node.js 22.19、24 与 26 上运行独立检查。兼容性 job 会在 `dsh-v0.1.2-alpha.1` 检出 `deepseek-ai/deepseek-harness`，运行 Harness 集成测试，并验证打包归档能够干净地加入和移出临时 `web` profile。
+CI 会在 Node.js 22.19、24 与 26 上运行独立检查。兼容性矩阵会分别在 `dsh-v0.1.2-alpha.1` 与 `dsh-v0.1.2-alpha.2` 检出 `deepseek-ai/deepseek-harness`，运行 Harness 集成测试，并验证打包归档能够干净地加入和移出临时 `web` profile。
 
 使用以下命令构建可安装归档：
 

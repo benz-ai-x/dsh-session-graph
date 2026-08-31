@@ -69,9 +69,10 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       submit: TypertRemoteMap['sessionGraphMerge/submit']
     }
   }
-  export class TypertRemoteFailure extends Error {
-    readonly failure: RemoteFailure
-    constructor(failure: RemoteFailure)
+  export class RemoteError extends Error {
+    readonly code: string
+    readonly details: object
+    constructor(code: string, message: string, details: object)
   }
   export abstract class TypertRemoteService {
     protected constructor(ctx: import('@deepseek-ai/cordis').Context, serviceKey: string)

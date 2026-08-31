@@ -36,7 +36,7 @@ English | [中文](README.zh.md)
 dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
 ```
 
-Restart the `web` profile, open a non-blank Session, and choose **Graph**. The current release targets DeepSeek Harness `0.1.2-alpha.1` and requires Node.js `^22.19.0 || >=24.0.0`.
+Restart the `web` profile, open a non-blank Session, and choose **Graph**. The current release supports DeepSeek Harness `0.1.2-alpha.1` and `0.1.2-alpha.2`, and requires Node.js `^22.19.0 || >=24.0.0`.
 
 ## What it adds
 
@@ -58,7 +58,7 @@ dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
 To install the tagged source directly from GitHub:
 
 ```sh
-dsh plugin --profile web add github:benz-ai-x/dsh-session-graph#v0.1.3
+dsh plugin --profile web add github:benz-ai-x/dsh-session-graph#v0.1.5
 ```
 
 pnpm blocks a git dependency's `prepare` script until the profile explicitly permits it. The first GitHub install exits with `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`; copy the exact key printed by dsh into `$DSH_HOME/profiles/web/pnpm-workspace.yaml` under `allowBuilds`, then rerun the command. This permission executes package code outside the agent sandbox, so inspect the source and pin a tag or commit.
@@ -73,7 +73,7 @@ dsh plugin --profile web remove @benz-ai-x/dsh-client-ui-session-graph
 
 Restart the target `web` profile after installation or removal. A running process does not watch its profile dependency list.
 
-The current `0.1.x` line targets DeepSeek Harness `0.1.2-alpha.1`. The plugin intentionally does not install that Harness checkout's unpublished `@deepseek-ai/*` packages into its own dependency tree; its Session persistence, LLM, Remote, and browser runtime services belong to the selected dsh profile.
+The current `0.1.x` line supports DeepSeek Harness `0.1.2-alpha.1` and `0.1.2-alpha.2`. Its Host entry adapts to both Remote failure APIs exposed across that transition. The plugin intentionally does not install those Harness checkouts' unpublished `@deepseek-ai/*` packages into its own dependency tree; its Session persistence, LLM, Remote, and browser runtime services belong to the selected dsh profile.
 
 ## Use the graph
 
@@ -148,7 +148,7 @@ pnpm run check
 DSH_HARNESS_ROOT=/path/to/deepseek-harness pnpm test:harness
 ```
 
-CI runs the standalone check on Node.js 22.19, 24, and 26. Its compatibility job checks out `deepseek-ai/deepseek-harness` at `dsh-v0.1.2-alpha.1`, runs the Harness integration suite, and verifies that the packed archive enters and leaves a scratch `web` profile cleanly.
+CI runs the standalone check on Node.js 22.19, 24, and 26. Its compatibility matrix checks out `deepseek-ai/deepseek-harness` at both `dsh-v0.1.2-alpha.1` and `dsh-v0.1.2-alpha.2`, runs the Harness integration suite, and verifies that the packed archive enters and leaves a scratch `web` profile cleanly.
 
 Build an installable archive with:
 

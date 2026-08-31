@@ -19,7 +19,7 @@
     "typescript",
     "react"
   ],
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

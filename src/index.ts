@@ -3,9 +3,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
+import * as TypertProtocol from '@deepseek-ai/dsh-typert-protocol'
 import {
   Remote,
-  TypertRemoteFailure,
   TypertRemoteService,
 } from '@deepseek-ai/dsh-typert-protocol'
 import {
@@ -38,6 +38,40 @@ export { Config, resolveConfig } from './config.ts'
 
 /** Eager Host services required by the read-only digest capability. */
 export const inject = ['sessionPersistence', 'llm']
+
+interface RemoteFailurePayload {
+  readonly code: string
+  readonly message: string
+  readonly details: object
+}
+
+type RemoteErrorConstructor = new (
+  code: string,
+  message: string,
+  details: object,
+) => Error
+
+type LegacyRemoteFailureConstructor = new (failure: RemoteFailurePayload) => Error
+
+/**
+ * Construct a transport-visible business failure across the alpha.1/alpha.2
+ * Typert error-vocabulary transition. Reflective lookup is intentional: a
+ * static named import makes Node reject the whole plugin before this adapter
+ * can select the constructor exposed by the active Harness profile.
+ */
+function remoteFailure(failure: RemoteFailurePayload): Error {
+  const RemoteError = Reflect.get(TypertProtocol, 'RemoteError') as
+    | RemoteErrorConstructor
+    | undefined
+  if (typeof RemoteError === 'function') {
+    return new RemoteError(failure.code, failure.message, failure.details)
+  }
+  const TypertRemoteFailure = Reflect.get(TypertProtocol, 'TypertRemoteFailure') as
+    | LegacyRemoteFailureConstructor
+    | undefined
+  if (typeof TypertRemoteFailure === 'function') return new TypertRemoteFailure(failure)
+  throw new Error('Session Graph requires a supported DSH Remote failure constructor')
+}
 
 function promptFor(request: SessionDigestModelRequest): string {
   return JSON.stringify({
@@ -178,7 +212,7 @@ export class SessionGraphDigestService extends TypertRemoteService implements Qu
       if (signal.aborted) throw error
       const code = error instanceof SessionDigestError ? error.code : 'generation-failed'
       const message = error instanceof Error ? error.message : 'Session Digest generation failed'
-      throw new TypertRemoteFailure({ code, message, details: {} })
+      throw remoteFailure({ code, message, details: {} })
     }
   }
 
@@ -204,8 +238,8 @@ export class SessionGraphMergeService extends TypertRemoteService implements Qui
     )
   }
 
-  private disposedFailure(stage: SessionMergeHostStage): TypertRemoteFailure {
-    return new TypertRemoteFailure({
+  private disposedFailure(stage: SessionMergeHostStage): Error {
+    return remoteFailure({
       code: 'disposed',
       message: 'Session Merge service is disposed',
       details: { stage },
@@ -227,7 +261,7 @@ export class SessionGraphMergeService extends TypertRemoteService implements Qui
       }
       const code = error instanceof SessionMergeHostError ? error.code : 'merge-submit-failed'
       const message = error instanceof Error ? error.message : 'Session Merge submission failed'
-      throw new TypertRemoteFailure({ code, message, details: { stage } })
+      throw remoteFailure({ code, message, details: { stage } })
     }
   }
 

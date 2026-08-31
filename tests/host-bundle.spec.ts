@@ -10,5 +10,6 @@ describe('Host bundle', () => {
     expect(code).toContain('Remote("submit")')
     expect(code).toContain('from "@deepseek-ai/dsh-llm"')
     expect(code).toContain('from "@deepseek-ai/dsh-typert-protocol"')
+    expect(code).not.toMatch(/import\s*\{[^}]*\bTypertRemoteFailure\b[^}]*\}\s*from/u)
   })
 })
