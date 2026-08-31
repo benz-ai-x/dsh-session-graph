@@ -45,3 +45,7 @@ Use the default five-role triage label vocabulary. See `docs/agents/triage-label
 ### Domain docs
 
 This is a single-context repository using root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+
+### Handoffs
+
+The repository root `HANDOFF.md` is the only canonical live handoff. Update it in place and do not create alternate handoff files. `docs/HANDOFF.md` is a historical snapshot and must not override the root handoff.
