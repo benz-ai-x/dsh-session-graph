@@ -7,6 +7,7 @@ kind: "package-bundle"
 
 [![CI](https://github.com/benz-ai-x/dsh-session-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/benz-ai-x/dsh-session-graph/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/%40benz-ai-x%2Fdsh-client-ui-session-graph?logo=npm)](https://www.npmjs.com/package/@benz-ai-x/dsh-client-ui-session-graph)
+[![GitHub release](https://img.shields.io/github/v/release/benz-ai-x/dsh-session-graph?logo=github)](https://github.com/benz-ai-x/dsh-session-graph/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 English | [中文](README.zh.md)
@@ -34,9 +35,18 @@ English | [中文](README.zh.md)
 
 ```sh
 dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
+dsh web
 ```
 
-Restart the `web` profile, open a non-blank Session, and choose **Graph**. The current release supports DeepSeek Harness `0.1.2-alpha.1` and `0.1.2-alpha.2`, and requires Node.js `^22.19.0 || >=24.0.0`.
+If `dsh web` is already running, stop it before restarting. Open the one-time authenticated URL printed by the command, enter a non-blank Session, and choose **Graph**. Do not share or persist the URL token.
+
+## Compatibility
+
+| Session Graph | DeepSeek Harness | Node.js | Verification |
+|---|---|---|---|
+| [`v0.1.5`](https://github.com/benz-ai-x/dsh-session-graph/releases/tag/v0.1.5) | `0.1.2-alpha.1`, `0.1.2-alpha.2` | `^22.19.0 || >=24.0.0` | CI, real Harness integration, packed-profile add/remove |
+
+Use the current npm release when running Harness `0.1.2-alpha.2`; older immutable tags are not covered by the current compatibility matrix. The `v0.1.5` Host entry adapts to the Remote failure APIs on both supported Harness versions.
 
 ## What it adds
 
@@ -47,6 +57,15 @@ Restart the `web` profile, open a non-blank Session, and choose **Graph**. The c
 | Cross-session workflows | Open or branch any Canvas Session and merge immutable snapshots from two or three sources |
 | Read-only Session Digests | Generate concise overviews, key outcomes, and open items on demand without changing Session logs |
 
+### Data and model behavior
+
+| Action | Durable effect | Model use |
+|---|---|---|
+| Browse or arrange | Does not change Session logs; arrangements stay in browser storage | None |
+| Generate a digest | Keeps a revision-scoped Host-memory cache; does not append a message | One auxiliary request on the Session route or configured fallback |
+| Create a branch | Uses the normal Harness branch operation | No additional request from this plugin |
+| Merge Sessions | Creates an independent target and durable snapshot provenance; sources remain unchanged | The target processes the queued instruction on its normal route |
+
 ## Install
 
 Install the published npm package into the `web` profile:
@@ -55,13 +74,24 @@ Install the published npm package into the `web` profile:
 dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
 ```
 
-To install the tagged source directly from GitHub:
+Confirm that the resolved profile contains the bundle:
+
+```sh
+dsh --profile web --dump-config
+```
+
+The output should contain `name: '@benz-ai-x/dsh-client-ui-session-graph'`.
+
+<details>
+<summary>Install a pinned GitHub source tag</summary>
 
 ```sh
 dsh plugin --profile web add github:benz-ai-x/dsh-session-graph#v0.1.5
 ```
 
-pnpm blocks a git dependency's `prepare` script until the profile explicitly permits it. The first GitHub install exits with `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`; copy the exact key printed by dsh into `$DSH_HOME/profiles/web/pnpm-workspace.yaml` under `allowBuilds`, then rerun the command. This permission executes package code outside the agent sandbox, so inspect the source and pin a tag or commit.
+pnpm blocks a git dependency's `prepare` script until the profile explicitly permits it. The first GitHub install exits with `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`; copy the exact key printed by dsh into `$DSH_HOME/profiles/web/pnpm-workspace.yaml` under `allowBuilds`, then rerun the command. This permission executes package code outside the agent sandbox, so inspect the source and keep the tag or commit pinned.
+
+</details>
 
 The package contains both the browser plugin and its `cordis.patch.yml` bundle patch. The dsh plugin manager inserts it after the Session, Workspace, locale, renderer, and conversation plugins already supplied by the `web` profile. No manual `cordis.yml` edit is required.
 
@@ -73,7 +103,7 @@ dsh plugin --profile web remove @benz-ai-x/dsh-client-ui-session-graph
 
 Restart the target `web` profile after installation or removal. A running process does not watch its profile dependency list.
 
-The current `0.1.x` line supports DeepSeek Harness `0.1.2-alpha.1` and `0.1.2-alpha.2`. Its Host entry adapts to both Remote failure APIs exposed across that transition. The plugin intentionally does not install those Harness checkouts' unpublished `@deepseek-ai/*` packages into its own dependency tree; its Session persistence, LLM, Remote, and browser runtime services belong to the selected dsh profile.
+The plugin intentionally does not install the supported Harness checkouts' unpublished `@deepseek-ai/*` packages into its own dependency tree. Session persistence, LLM, Remote, and browser runtime services belong to the selected dsh profile.
 
 ## Use the graph
 
@@ -133,12 +163,24 @@ Most sessions need no configuration because their logs record the model route. F
 
 `provider` and `model` must be supplied together and never override a route recorded by the Session. `maxOutputTokens` defaults to `800`; `timeoutMs` defaults to `60000`. Plugin activation validates this configuration through its exported Standard Schema and rejects blank routes, incomplete pairs, non-integers, and non-positive limits.
 
-## Develop
+## Troubleshooting
+
+| Symptom | Check first |
+|---|---|
+| **Graph** tab is missing | Restart `dsh web`, open a non-blank Session, and verify the package appears in `dsh --profile web --dump-config` |
+| Host startup fails around a Remote error export | Install `v0.1.5` or newer and confirm the resolved profile is not retaining an older package version |
+| GitHub source install reports `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` | Inspect the pinned source, add the exact key printed by dsh to that profile's `allowBuilds`, and retry |
+| Digest generation reports no model route | Use a Session with a logged route or configure the `provider` and `model` fallback pair |
+| The Web URL rejects access | Open the complete authenticated URL printed by `dsh web`; do not reuse or share a stripped token |
+
+If the problem persists, include the package version shown in the Graph header, the Harness version, and the relevant Host/browser error in a [GitHub issue](https://github.com/benz-ai-x/dsh-session-graph/issues/new).
+
+## Develop and contribute
 
 Requirements are Node.js `^22.19.0 || >=24.0.0` and pnpm `11.7.0`.
 
 ```sh
-pnpm install
+pnpm install --frozen-lockfile
 pnpm run check
 ```
 
@@ -147,6 +189,8 @@ pnpm run check
 ```sh
 DSH_HARNESS_ROOT=/path/to/deepseek-harness pnpm test:harness
 ```
+
+Read [`CONTEXT.md`](CONTEXT.md) for the domain model and [`docs/adr/`](docs/adr/) for durable design decisions before changing Session, Merge, Digest, or persistence behavior. Setup or behavior changes must update both this file and [`README.zh.md`](README.zh.md). Start user-visible work from a [GitHub issue](https://github.com/benz-ai-x/dsh-session-graph/issues).
 
 CI runs the standalone check on Node.js 22.19, 24, and 26. Its compatibility matrix checks out `deepseek-ai/deepseek-harness` at both `dsh-v0.1.2-alpha.1` and `dsh-v0.1.2-alpha.2`, runs the Harness integration suite, and verifies that the packed archive enters and leaves a scratch `web` profile cleanly.
 
@@ -166,7 +210,7 @@ The package uses an [npm trusted publisher](https://docs.npmjs.com/trusted-publi
 
 Every GitHub Release must first update `package.json`. Build and verify that the Graph header badge shows the same version, merge the change, create the matching immutable `v<version>` tag, and then publish the Release. To publish an existing tag such as `v0.1.2`, run the Publish workflow manually and pass that tag.
 
-The package exports two Host entries and one lazy browser module. Every JavaScript entry ships a matching TypeScript declaration in the packed archive:
+The package exports two Node-facing entries and one lazy browser module. Every JavaScript entry ships a matching TypeScript declaration in the packed archive:
 
 | Export | Purpose |
 |---|---|

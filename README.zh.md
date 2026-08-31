@@ -7,6 +7,7 @@ kind: "package-bundle"
 
 [![CI](https://github.com/benz-ai-x/dsh-session-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/benz-ai-x/dsh-session-graph/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/%40benz-ai-x%2Fdsh-client-ui-session-graph?logo=npm)](https://www.npmjs.com/package/@benz-ai-x/dsh-client-ui-session-graph)
+[![GitHub release](https://img.shields.io/github/v/release/benz-ai-x/dsh-session-graph?logo=github)](https://github.com/benz-ai-x/dsh-session-graph/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [English](README.md) | 中文
@@ -34,9 +35,18 @@ kind: "package-bundle"
 
 ```sh
 dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
+dsh web
 ```
 
-重启 `web` profile，打开任意非空 Session，然后选择 **Graph**。当前版本支持 DeepSeek Harness `0.1.2-alpha.1` 与 `0.1.2-alpha.2`，需要 Node.js `^22.19.0 || >=24.0.0`。
+若 `dsh web` 已在运行，请先停止再重启。打开命令打印的一次性认证 URL，进入任意非空 Session，然后选择 **Graph**。不要分享或持久保存 URL 中的 token。
+
+## 兼容性
+
+| Session Graph | DeepSeek Harness | Node.js | 验证方式 |
+|---|---|---|---|
+| [`v0.1.5`](https://github.com/benz-ai-x/dsh-session-graph/releases/tag/v0.1.5) | `0.1.2-alpha.1`、`0.1.2-alpha.2` | `^22.19.0 || >=24.0.0` | CI、真实 Harness 集成、打包 profile 安装/移除 |
+
+运行 Harness `0.1.2-alpha.2` 时请使用当前 npm 版本；更早的不可变 tag 不在当前兼容矩阵内。`v0.1.5` 的 Host 入口会适配两个受支持 Harness 版本各自的 Remote failure API。
 
 ## 核心能力
 
@@ -47,6 +57,15 @@ dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
 | 跨会话工作流 | 打开任意 Canvas Session、创建 Branch，并汇聚两到三个来源的不可变快照 |
 | 只读 Session Digest | 按需生成简短概览、关键结论和待办，且不改变 Session 日志 |
 
+### 数据与模型行为
+
+| 操作 | 持久化影响 | 模型调用 |
+|---|---|---|
+| 浏览或排列 | 不改变 Session 日志；排列保存在浏览器存储中 | 无 |
+| 生成摘要 | 仅保留按 revision 区分的 Host 内存缓存；不追加消息 | 在 Session 路由或配置的兜底路由上发起一次辅助请求 |
+| 创建分支 | 使用 Harness 的常规 Branch 操作 | 本插件不额外发起请求 |
+| 汇聚会话 | 创建独立目标和持久快照溯源；来源保持不变 | 目标会话在正常路由上处理排队指令 |
+
 ## 安装
 
 从 npm 安装已发布的包，并将其加入 `web` profile：
@@ -55,13 +74,24 @@ dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
 dsh plugin --profile web add @benz-ai-x/dsh-client-ui-session-graph
 ```
 
-若要直接从 GitHub 安装已打 tag 的源码：
+确认解析后的 profile 已包含该组合包：
+
+```sh
+dsh --profile web --dump-config
+```
+
+输出应包含 `name: '@benz-ai-x/dsh-client-ui-session-graph'`。
+
+<details>
+<summary>从固定 GitHub tag 安装源码</summary>
 
 ```sh
 dsh plugin --profile web add github:benz-ai-x/dsh-session-graph#v0.1.5
 ```
 
-profile 显式授权前，pnpm 会阻止 git 依赖执行 `prepare` 脚本。首次 GitHub 安装会以 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` 退出；把 dsh 打印的完整键复制到 `$DSH_HOME/profiles/web/pnpm-workspace.yaml` 的 `allowBuilds` 下，再次执行命令。这项权限允许包代码在 agent 沙箱之外执行，因此应先检查源码，并锁定 tag 或 commit。
+profile 显式授权前，pnpm 会阻止 git 依赖执行 `prepare` 脚本。首次 GitHub 安装会以 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` 退出；把 dsh 打印的完整键复制到 `$DSH_HOME/profiles/web/pnpm-workspace.yaml` 的 `allowBuilds` 下，再次执行命令。这项权限允许包代码在 agent 沙箱之外执行，因此应先检查源码，并继续锁定该 tag 或 commit。
+
+</details>
 
 本包同时包含浏览器插件与 `cordis.patch.yml` 组合包补丁。dsh 插件管理器会把它插入 `web` profile 已提供的 Session、Workspace、locale、renderer 与 conversation 插件之后，无需手工修改 `cordis.yml`。
 
@@ -73,7 +103,7 @@ dsh plugin --profile web remove @benz-ai-x/dsh-client-ui-session-graph
 
 安装或移除后请重启目标 `web` profile。运行中的进程不会监视 profile 依赖列表。
 
-当前 `0.1.x` 版本线支持 DeepSeek Harness `0.1.2-alpha.1` 与 `0.1.2-alpha.2`，Host 入口会适配这次版本转换前后的两套 Remote failure API。插件不会把这些 Harness checkout 中尚未单独发布的 `@deepseek-ai/*` 包安装进自己的依赖树；Session 持久化、LLM、Remote 与浏览器运行时服务统一由所选 dsh profile 持有。
+插件不会把受支持 Harness checkout 中尚未单独发布的 `@deepseek-ai/*` 包安装进自己的依赖树；Session 持久化、LLM、Remote 与浏览器运行时服务统一由所选 dsh profile 持有。
 
 ## 使用图谱
 
@@ -133,12 +163,24 @@ dsh plugin --profile web remove @benz-ai-x/dsh-client-ui-session-graph
 
 `provider` 与 `model` 必须成对提供，并且绝不会覆盖会话已记录的路由。`maxOutputTokens` 默认为 `800`，`timeoutMs` 默认为 `60000`。插件激活会通过对外导出的 Standard Schema 校验配置，并拒绝空白路由、缺少配对字段、非整数与非正数限制。
 
-## 开发
+## 故障排查
+
+| 现象 | 首先检查 |
+|---|---|
+| 找不到 **Graph** 标签 | 重启 `dsh web`，打开非空 Session，并确认 `dsh --profile web --dump-config` 中存在本包 |
+| Host 在 Remote error 导出附近启动失败 | 安装 `v0.1.5` 或更高版本，并确认解析后的 profile 没有保留旧包版本 |
+| GitHub 源码安装报告 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` | 检查固定版本源码，把 dsh 打印的完整键加入该 profile 的 `allowBuilds`，然后重试 |
+| 生成摘要时报告没有模型路由 | 使用日志中带路由的 Session，或配置 `provider` 与 `model` 兜底字段对 |
+| Web URL 拒绝访问 | 打开 `dsh web` 打印的完整认证 URL；不要复用或分享被截掉 token 的地址 |
+
+若问题仍然存在，请在 [GitHub Issue](https://github.com/benz-ai-x/dsh-session-graph/issues/new) 中附上 Graph 页头显示的包版本、Harness 版本以及相关 Host/浏览器错误。
+
+## 开发与贡献
 
 环境要求为 Node.js `^22.19.0 || >=24.0.0` 与 pnpm `11.7.0`。
 
 ```sh
-pnpm install
+pnpm install --frozen-lockfile
 pnpm run check
 ```
 
@@ -147,6 +189,8 @@ pnpm run check
 ```sh
 DSH_HARNESS_ROOT=/path/to/deepseek-harness pnpm test:harness
 ```
+
+修改 Session、Merge、Digest 或持久化行为前，请先阅读 [`CONTEXT.md`](CONTEXT.md) 的领域模型与 [`docs/adr/`](docs/adr/) 的持久设计决策。安装方式或产品行为变化时必须同时更新本文与 [`README.md`](README.md)。面向用户的工作应从 [GitHub Issue](https://github.com/benz-ai-x/dsh-session-graph/issues) 开始。
 
 CI 会在 Node.js 22.19、24 与 26 上运行独立检查。兼容性矩阵会分别在 `dsh-v0.1.2-alpha.1` 与 `dsh-v0.1.2-alpha.2` 检出 `deepseek-ai/deepseek-harness`，运行 Harness 集成测试，并验证打包归档能够干净地加入和移出临时 `web` profile。
 
@@ -166,7 +210,7 @@ pnpm pack
 
 每次发布 GitHub Release 前都必须先更新 `package.json`，构建并确认 Graph 页头徽标显示相同版本，再合入变更、创建匹配且不可移动的 `v<version>` tag，最后发布 Release。若要发布 `v0.1.2` 这类现有 tag，请手工运行 Publish workflow 并传入该 tag。
 
-本包导出两个 Host 入口和一个惰性加载的浏览器模块；实际打包归档中的每个 JavaScript 入口都带有匹配的 TypeScript 声明：
+本包导出两个 Node 侧入口和一个惰性加载的浏览器模块；实际打包归档中的每个 JavaScript 入口都带有匹配的 TypeScript 声明：
 
 | 导出 | 用途 |
 |---|---|
