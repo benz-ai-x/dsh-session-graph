@@ -192,7 +192,7 @@ DSH_HARNESS_ROOT=/path/to/deepseek-harness pnpm test:harness
 
 Read [`CONTEXT.md`](CONTEXT.md) for the domain model and [`docs/adr/`](docs/adr/) for durable design decisions before changing Session, Merge, Digest, or persistence behavior. Setup or behavior changes must update both this file and [`README.zh.md`](README.zh.md). Start user-visible work from a [GitHub issue](https://github.com/benz-ai-x/dsh-session-graph/issues).
 
-CI runs the standalone check on Node.js 22.19, 24, and 26. Its compatibility matrix checks out `deepseek-ai/deepseek-harness` at both `dsh-v0.1.2-alpha.1` and `dsh-v0.1.2-alpha.2`, runs the Harness integration suite, and verifies that the packed archive enters and leaves a scratch `web` profile cleanly.
+CI runs the standalone check on Node.js 22.19, 24, and 26. Its compatibility matrix checks out `deepseek-ai/deepseek-harness` at `dsh-v0.1.2-alpha.1`, `dsh-v0.1.2-alpha.2`, and `dsh-v0.1.2-alpha.3`, runs the Harness integration suite, and verifies that the packed archive enters and leaves a scratch `web` profile cleanly.
 
 Build an installable archive with:
 

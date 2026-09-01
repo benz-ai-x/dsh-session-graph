@@ -192,7 +192,7 @@ DSH_HARNESS_ROOT=/path/to/deepseek-harness pnpm test:harness
 
 修改 Session、Merge、Digest 或持久化行为前，请先阅读 [`CONTEXT.md`](CONTEXT.md) 的领域模型与 [`docs/adr/`](docs/adr/) 的持久设计决策。安装方式或产品行为变化时必须同时更新本文与 [`README.md`](README.md)。面向用户的工作应从 [GitHub Issue](https://github.com/benz-ai-x/dsh-session-graph/issues) 开始。
 
-CI 会在 Node.js 22.19、24 与 26 上运行独立检查。兼容性矩阵会分别在 `dsh-v0.1.2-alpha.1` 与 `dsh-v0.1.2-alpha.2` 检出 `deepseek-ai/deepseek-harness`，运行 Harness 集成测试，并验证打包归档能够干净地加入和移出临时 `web` profile。
+CI 会在 Node.js 22.19、24 与 26 上运行独立检查。兼容性矩阵会分别在 `dsh-v0.1.2-alpha.1`、`dsh-v0.1.2-alpha.2` 与 `dsh-v0.1.2-alpha.3` 检出 `deepseek-ai/deepseek-harness`，运行 Harness 集成测试，并验证打包归档能够干净地加入和移出临时 `web` profile。
 
 使用以下命令构建可安装归档：
 

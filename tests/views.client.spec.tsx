@@ -206,6 +206,16 @@ function mount(
   const useConversation = bindSnapshotSelector(createSnapshotStore(EMPTY_CONVERSATION_SNAPSHOT))
   const useConversationViews = bindSnapshotSelector(createSnapshotStore(tabsOf(slots)))
   const conversation = createConversationStore().create()
+  // Harness 0.1.2-alpha.3 routes tab selection and view-focus requests
+  // through injected callbacks (selectView/openView) that also activate the
+  // ConversationController binding; earlier alphas read the same state through
+  // `actions`. The bench mounts no controller, so the store action is the
+  // whole observable effect, and passing both shapes keeps the bench running
+  // across every matrix Harness (extra props are ignored on older alphas).
+  const selectView = (view: string): void => { conversation.actions.setView(view) }
+  const openView = (view: string, focus: string): void => {
+    conversation.actions.openView(view, focus)
+  }
   const useInput = bindSnapshotSelector(createSnapshotStore<InputState>({
     draft: '', imageIds: [], draftRev: 0, phase: 'plain', occurrences: [], queue: [],
   }))
@@ -271,6 +281,7 @@ function mount(
         useInput={useInput}
         inputActions={inputActions}
         open={vi.fn()}
+        selectView={selectView}
         t={tConversation}
       />
       <ConversationSession
@@ -288,6 +299,7 @@ function mount(
         actions={conversation.actions}
         renderSlot={renderSlot}
         bindDraftMirror={() => () => {}}
+        openView={openView}
         useInput={useInput}
         inputActions={inputActions}
       />
