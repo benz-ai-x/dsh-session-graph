@@ -44,9 +44,10 @@ dsh web
 
 | Session Graph | DeepSeek Harness | Node.js | 验证方式 |
 |---|---|---|---|
+| [`v0.1.6`](https://github.com/benz-ai-x/dsh-session-graph/releases/tag/v0.1.6) | `0.1.2-alpha.1`、`0.1.2-alpha.2`、`0.1.2-alpha.3` | `^22.19.0 || >=24.0.0` | CI、真实 Harness 集成、打包 profile 安装/移除 |
 | [`v0.1.5`](https://github.com/benz-ai-x/dsh-session-graph/releases/tag/v0.1.5) | `0.1.2-alpha.1`、`0.1.2-alpha.2` | `^22.19.0 || >=24.0.0` | CI、真实 Harness 集成、打包 profile 安装/移除 |
 
-运行 Harness `0.1.2-alpha.2` 时请使用当前 npm 版本；更早的不可变 tag 不在当前兼容矩阵内。`v0.1.5` 的 Host 入口会适配两个受支持 Harness 版本各自的 Remote failure API。
+运行 Harness `0.1.2-alpha.3` 时请使用当前 npm 版本；更早的不可变 tag 不在当前兼容矩阵内。`v0.1.6` 无运行时变更：`0.1.2-alpha.3` 审计只发现增量式 API 演进，本版本通过 CI 与多 alpha 集成台架扩展验证矩阵。
 
 ## 核心能力
 

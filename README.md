@@ -44,9 +44,10 @@ If `dsh web` is already running, stop it before restarting. Open the one-time au
 
 | Session Graph | DeepSeek Harness | Node.js | Verification |
 |---|---|---|---|
+| [`v0.1.6`](https://github.com/benz-ai-x/dsh-session-graph/releases/tag/v0.1.6) | `0.1.2-alpha.1`, `0.1.2-alpha.2`, `0.1.2-alpha.3` | `^22.19.0 || >=24.0.0` | CI, real Harness integration, packed-profile add/remove |
 | [`v0.1.5`](https://github.com/benz-ai-x/dsh-session-graph/releases/tag/v0.1.5) | `0.1.2-alpha.1`, `0.1.2-alpha.2` | `^22.19.0 || >=24.0.0` | CI, real Harness integration, packed-profile add/remove |
 
-Use the current npm release when running Harness `0.1.2-alpha.2`; older immutable tags are not covered by the current compatibility matrix. The `v0.1.5` Host entry adapts to the Remote failure APIs on both supported Harness versions.
+Use the current npm release when running Harness `0.1.2-alpha.3`; older immutable tags are not covered by the current compatibility matrix. `v0.1.6` ships no runtime change: the `0.1.2-alpha.3` audit found only additive API drift, so it extends the verified matrix through CI and the multi-alpha integration bench.
 
 ## What it adds
 
