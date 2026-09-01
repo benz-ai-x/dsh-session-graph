@@ -8,14 +8,14 @@ Updated: 2026-09-01 (Asia/Shanghai)
 
 - Repository: [`benz-ai-x/dsh-session-graph`](https://github.com/benz-ai-x/dsh-session-graph)
 - Package: [`@benz-ai-x/dsh-client-ui-session-graph`](https://www.npmjs.com/package/@benz-ai-x/dsh-client-ui-session-graph)
-- Branch: `main`; release baseline `v0.1.5` is commit `bb94fb2`, with documentation commits following it
-- Latest release: [`v0.1.5`](https://github.com/benz-ai-x/dsh-session-graph/releases/tag/v0.1.5); npm `latest` is `0.1.5`
+- Branch: `main`; release baseline `v0.1.6` is commit `cb48647`, with documentation commits following it
+- Latest release: [`v0.1.6`](https://github.com/benz-ai-x/dsh-session-graph/releases/tag/v0.1.6); npm `latest` is `0.1.6`
 - Scope: this handoff belongs to `dsh-session-graph`, not the separate `dsh-graph-workflow` repository.
 - No implementation or release work remains from the Remote compatibility fix.
 
 ## Most recent outcome
 
-The Harness `0.1.2-alpha.3` compatibility audit (2026-09-01) found no product-code incompatibility: every plugin-consumed API changed only additively (`ISession.loadThrough`, `PendingSubmission.placement`, conversation `openView`/`selectView` injections — none implemented or called by this plugin). The alpha.3 breakage was confined to the `tests/views.client.spec.tsx` bench, which hand-mounts the real Conversation skeleton and lacked the newly injected view-selection callbacks; the bench now supplies `selectView`/`openView` store-action twins that remain harmless extra props on alpha.1/alpha.2. The CI harness matrix and both READMEs' CI paragraphs now cover `dsh-v0.1.2-alpha.3`; the release compatibility table is unchanged pending the next release.
+The Harness `0.1.2-alpha.3` compatibility audit (2026-09-01) found no product-code incompatibility: every plugin-consumed API changed only additively (`ISession.loadThrough`, `PendingSubmission.placement`, conversation `openView`/`selectView` injections — none implemented or called by this plugin). The alpha.3 breakage was confined to the `tests/views.client.spec.tsx` bench, which hand-mounts the real Conversation skeleton and lacked the newly injected view-selection callbacks; the bench now supplies `selectView`/`openView` store-action twins that remain harmless extra props on alpha.1/alpha.2. Release `v0.1.6` (commit `cb48647`, no runtime change) carries the audit outcome: the CI harness matrix, both READMEs' CI paragraphs, and the release compatibility table all cover `dsh-v0.1.2-alpha.3`.
 
 Release `v0.1.5` fixes Host startup against DeepSeek Harness `0.1.2-alpha.2` while retaining `0.1.2-alpha.1` compatibility. The cause, implementation, regression coverage, version bump, bilingual documentation, and CI matrix are all captured in commit [`bb94fb2`](https://github.com/benz-ai-x/dsh-session-graph/commit/bb94fb25fcda5680ec71f5f9600bf89b61e295fc); do not reconstruct them in this document.
 
@@ -47,6 +47,8 @@ Do not restore `session-graph-handover.md` or create another live handoff file.
 
 - Local package check: 18 files, 167 tests passed.
 - Local Harness integration, 2026-09-01: `0.1.2-alpha.1`, `0.1.2-alpha.2`, and `0.1.2-alpha.3` checkouts each pass 2 files, 97 tests (the alpha.3 leg required the bench fix above; alpha.1/alpha.2 were re-run to prove the fix stays backward compatible).
+- CI passed Node 22.19/24/26 plus Harness `alpha.1`, `alpha.2`, and `alpha.3` on the matrix commit: [run 33459461048](https://github.com/benz-ai-x/dsh-session-graph/actions/runs/33459461048).
+- Trusted Publishing and npm provenance for `v0.1.6` completed successfully: [run 33459622859](https://github.com/benz-ai-x/dsh-session-graph/actions/runs/33459622859); npm `latest` is `0.1.6`.
 - Both public READMEs pass relative-link checks and render through GitHub's GFM API; the post-update package check still passes 167 tests.
 - CI passed Node 22.19/24/26 plus Harness `alpha.1` and `alpha.2`, including packed-profile installation/removal: [run 33347383516](https://github.com/benz-ai-x/dsh-session-graph/actions/runs/33347383516).
 - Trusted Publishing and npm provenance completed successfully: [run 33347475410](https://github.com/benz-ai-x/dsh-session-graph/actions/runs/33347475410).
