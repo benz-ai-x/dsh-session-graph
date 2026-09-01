@@ -50,8 +50,7 @@ Do not restore `session-graph-handover.md` or create another live handoff file.
 - CI passed Node 22.19/24/26 plus Harness `alpha.1`, `alpha.2`, and `alpha.3` on the matrix commit: [run 33459461048](https://github.com/benz-ai-x/dsh-session-graph/actions/runs/33459461048).
 - Trusted Publishing and npm provenance for `v0.1.6` completed successfully: [run 33459622859](https://github.com/benz-ai-x/dsh-session-graph/actions/runs/33459622859); npm `latest` is `0.1.6`.
 - Both public READMEs pass relative-link checks and render through GitHub's GFM API; the post-update package check still passes 167 tests.
-- CI passed Node 22.19/24/26 plus Harness `alpha.1` and `alpha.2`, including packed-profile installation/removal: [run 33347383516](https://github.com/benz-ai-x/dsh-session-graph/actions/runs/33347383516).
-- Trusted Publishing and npm provenance completed successfully: [run 33347475410](https://github.com/benz-ai-x/dsh-session-graph/actions/runs/33347475410).
+- CI passed Node 22.19/24/26 plus Harness `alpha.1`, `alpha.2`, and `alpha.3`, including packed-profile installation/removal: [run 33459461048](https://github.com/benz-ai-x/dsh-session-graph/actions/runs/33459461048).
 
 ## Next-session start
 
