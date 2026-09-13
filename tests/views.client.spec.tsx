@@ -198,6 +198,10 @@ describe('reading and capture continuity', () => {
     scroller.scrollTop = 180
     fireEvent.scroll(scroller)
     fireEvent.click(screen.getByRole('button', { name: '展开阅读' }))
+    chooseCanvasAction('重新布局')
+    expect(screen.getByTestId('session-graph-panel-scroll')).toBe(scroller)
+    expect(screen.getByRole('tab', { name: '原文' }).getAttribute('aria-selected')).toBe('true')
+    expect(nodeButton('a').getAttribute('aria-selected')).toBe('true')
     expect(scroller.scrollTop).toBe(180)
     const collapse = screen.getByRole('button', { name: '收起阅读' })
     collapse.focus()
@@ -1119,6 +1123,12 @@ describe('Research Topics registered Graph workflow', () => {
     switchTab('Research Graph')
     fireEvent.change(screen.getByRole('combobox', { name: '研究范围' }), { target: { value: 'topics' } })
     await waitFor(() => { expect(nodeButton('a').style.left).toBe('100px') })
+    chooseCanvasAction('重新布局')
+    expect(nodeButton('a').style.left).toBe('0px')
+    expect(b.writeTopic).not.toHaveBeenCalled()
+    chooseCanvasAction('撤销重新布局')
+    expect(nodeButton('a').style.left).toBe('100px')
+    expect(b.writeTopic).not.toHaveBeenCalled()
     chooseCanvasAction('重置布局')
     const resetPosition = nodeButton('a').style.left
     expect(resetPosition).not.toBe('100px')
@@ -1780,10 +1790,10 @@ describe('graph tab rendering and interaction', () => {
 
     for (const key of ['root', 'branchChild']) {
       const node = nodeButton(key)
-      const input = document.querySelector(`[data-port-id="${key}:input"]`)
-      const output = document.querySelector(`[data-port-id="${key}:output"]`)
-      expect(input?.getAttribute('data-port-id')).toBe(`${key}:input`)
-      expect(output?.getAttribute('data-port-id')).toBe(`${key}:output`)
+      const input = document.querySelector(`[data-port-id^="${key}:"][data-session-port="input"]`)
+      const output = document.querySelector(`[data-port-id^="${key}:"][data-session-port="output"]`)
+      expect(input?.getAttribute('data-session-port')).toBe('input')
+      expect(output?.getAttribute('data-session-port')).toBe('output')
       expect(input?.getAttribute('aria-hidden')).toBe('true')
       expect(output?.getAttribute('aria-hidden')).toBe('true')
       // Ports are siblings of the button so they can become independent
@@ -2693,11 +2703,21 @@ describe('relayout button', () => {
     fireEvent.pointerMove(node, { pointerId: 5, clientX: 340, clientY: 260 })
     fireEvent.pointerUp(node, { pointerId: 5 })
     expect(nodeButton('branchChild').style.left).not.toBe('0px')
+    const movedLeft = nodeButton('branchChild').style.left
+    const movedTop = nodeButton('branchChild').style.top
     chooseCanvasAction('重新布局')
     expect(nodeButton('branchChild').style.left).toBe('0px')
     expect(localStorage.getItem('dsh.session-graph.layout.["test-host","/w",null]')).toContain('"positions":{}')
-    // Collapsed clusters survive the relayout.
+    chooseCanvasAction('重新布局')
+    chooseCanvasAction('撤销重新布局')
+    expect(nodeButton('branchChild').style.left).toBe(movedLeft)
+    expect(nodeButton('branchChild').style.top).toBe(movedTop)
+    chooseCanvasAction('重新布局')
+    // A new collapse supersedes Undo; collapsed choices survive Relayout.
     fireEvent.click(document.querySelector('[data-cluster-id="root"] button')!)
+    chooseCanvasAction('重新布局')
+    fireEvent.click(screen.getByRole('button', { name: '图谱选项' }))
+    expect(screen.queryByRole('button', { name: '撤销重新布局' })).toBeNull()
     expect(localStorage.getItem('dsh.session-graph.layout.["test-host","/w",null]')).toContain('"collapsed":["root"]')
   })
 })
@@ -2720,7 +2740,7 @@ describe('reset and minimap', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '缩放至 100%' }).textContent).not.toBe('100%')
     })
-    expect(nodeButton('lone').style.top).toBe('2248px')
+    expect(nodeButton('lone').style.top).toBe('2000px')
     chooseCanvasAction('重置布局')
     // Manual position and collapse both cleared; node returns to the auto grid.
     expect(nodeButton('branchChild').style.left).toBe('0px')
@@ -2730,7 +2750,7 @@ describe('reset and minimap', () => {
     expect(stored).toContain('"collapsed":[]')
     // The cleared graph, rather than the previous far-away graph, owns Fit.
     expect(screen.getByRole('button', { name: '缩放至 100%' }).textContent).toBe('100%')
-    expect(nodeButton('root').parentElement?.style.transform).toBe('translate(380px, 164px) scale(1)')
+    expect(nodeButton('root').parentElement?.style.transform).toBe('translate(224px, 228px) scale(1)')
   })
 
   it('renders the minimap with node marks and the live viewport rectangle', async () => {
@@ -4163,12 +4183,13 @@ describe('title filter', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
     const transform = content().style.transform
     expect(transform).not.toBe(before)
-    // The lone node sits at (0, 256) in the vertical cluster stack; its
-    // center (120, 284) lands on the surface center (500, 300).
+    // Locate centers the actual node, independently of component packing.
+    const centerX = Number.parseFloat(nodeButton('lone').style.left) + 120
+    const centerY = Number.parseFloat(nodeButton('lone').style.top) + 28
     const match = transform.match(/translate\((-?\d+(?:\.\d+)?)px, (-?\d+(?:\.\d+)?)px\) scale\((\d+(?:\.\d+)?)\)/)!
     const [, panX, panY, scale] = match.map(Number)
-    expect(panX! + 120 * scale!).toBeCloseTo(500)
-    expect(panY! + 284 * scale!).toBeCloseTo(300)
+    expect(panX! + centerX * scale!).toBeCloseTo(500)
+    expect(panY! + centerY * scale!).toBeCloseTo(300)
   })
 
   it('keeps typing focus in the input: arrow keys never leave for the canvas', async () => {

@@ -174,7 +174,7 @@ A Session Cluster shown in compact form while retaining all of its Canvas Sessio
 _Avoid_: Hidden cluster, archived cluster
 
 **Relayout**:
-The action that restores automatic positions while preserving which Session Clusters are collapsed.
+The action that restores automatic positions while preserving which Session Clusters are collapsed. Its most recent placement change can be undone until another arrangement action or scope change supersedes it.
 _Avoid_: Reset
 
 **Reset**:
@@ -218,5 +218,5 @@ A continuous selection of completed Discussion Turns from one Session, addressed
 _Avoid_: Session Snapshot, saved knowledge card, live reference
 
 **Session Terminal**:
-A stable visual connection seat exposed above and below every Canvas Session card. The top seat is the Input Terminal and the bottom seat is the Output Terminal. Terminals are currently non-interactive and do not themselves create or change Session Lineage.
+A visual connection seat on a Canvas Session card: Input Terminals receive relations and Output Terminals originate them. Relations have distinct seats along the card edge; terminals are non-interactive and do not themselves create or change Session Lineage.
 _Avoid_: Branch, Subagent Derivation, connector node

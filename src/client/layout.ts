@@ -1,12 +1,13 @@
 /**
- * Deterministic top-to-bottom forest layout over the derived session graph.
- * Fixed metrics only — no measurement or graph-layout dependency: leaves consume
+ * Deterministic dependency layout over the derived session graph.
+ * Within each Branch frame, leaves consume
  * columns in depth-first display order and each parent centers on the
  * midpoint of its first and last child column, so identical graphs lay out
  * identically.
  * @module @benz-ai-x/dsh-research-graph/src/client/layout
  */
 import type { GraphEdge, GraphNode, SessionGraph } from './graph-model.ts'
+import { placeDependencyFrames } from './dependency-layout.ts'
 
 /** Node card width in px. */
 export const NODE_W = 240
@@ -16,8 +17,8 @@ export const CARD_H = 56
 export const COL_PITCH = 280
 /** Vertical distance between consecutive depth rows in px. */
 export const DEPTH_PITCH = 120
-/** Vertical gap between stacked cluster frames in px. */
-export const CLUSTER_GAP = 72
+/** Distance between dependency frames in px. */
+export { CLUSTER_GAP } from './dependency-layout.ts'
 /** Vertical distance between rows of a collapsed cluster in content px. */
 export const COLLAPSED_ROW = 64
 
@@ -89,9 +90,9 @@ export function edgePath(from: { x: number; y: number }, to: { x: number; y: num
  *
  * Each Session Cluster's Branch-connected Canvas Sessions are laid out in a local frame (depth
  * rows, leaves on allocated columns, parents centered on their first/last
- * child midpoint), then the cluster frames stack top to bottom in display
- * order. Each vertical allocation reserves the taller of its expanded tree
- * and collapsed column so compaction cannot overlap the following cluster. Edges curve
+ * child midpoint), then frames follow directed research dependencies.
+ * Disconnected components pack separately. Each allocation reserves the taller
+ * of its expanded tree and collapsed column. These provisional edges curve
  * from the parent's bottom-edge midpoint to the child's top-edge midpoint
  * (see {@link edgePath}).
  * @param graph - the derived graph.
@@ -129,16 +130,19 @@ export function layoutSessionGraph(graph: SessionGraph): LaidOutGraph {
     // Every cluster contributes at least its root or throws.
     const expandedHeight = Math.max(...local.map(entry => entry.y)) + CARD_H
     const compactHeight = (cluster.memberIds.length - 1) * COLLAPSED_ROW + CARD_H
-    return { local, stackHeight: Math.max(expandedHeight, compactHeight) }
+    return { id: String(cluster.rootId), local, width: nodeBounds(local).width, height: Math.max(expandedHeight, compactHeight) }
   })
 
-  // Stack the cluster frames top to bottom in display order.
-  let offsetY = 0
+  const positions = placeDependencyFrames(frames, graph.edges.flatMap(edge => {
+    const from = graph.nodes.get(edge.from)?.clusterId
+    const to = graph.nodes.get(edge.to)?.clusterId
+    return from === undefined || to === undefined ? [] : [{ from, to }]
+  }))
   for (const frame of frames) {
+    const position = positions.get(frame.id)!
     for (const entry of frame.local) {
-      nodes.push({ ...entry, y: entry.y + offsetY })
+      nodes.push({ ...entry, x: entry.x + position.x, y: entry.y + position.y })
     }
-    offsetY += frame.stackHeight + CLUSTER_GAP
   }
 
   const byKey = new Map(nodes.map(laid => [laid.key, laid]))

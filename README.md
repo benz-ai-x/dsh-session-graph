@@ -202,6 +202,8 @@ Open a non-blank session and choose **Research Graph** beside the standard conve
 - Drag nodes or complete cluster frames to arrange the canvas. Alignment guides snap nearby card edges. Reopening the graph retains the final released position, including quick drags.
 - Session Arrangement persistence fails soft. If browser storage is unavailable, denied, corrupt, or full, the live graph continues with automatic geometry instead of failing to render.
 - Small connection dots show relationship anchors; they are not drag handles. Branches are neutral solid directed edges, Merge Relations are branded solid directed edges, and Subagent Derivations are dashed.
+- Both Workspace and Research Topic graphs keep related sources on the same dependency row, with their shared result below; disconnected collections pack separately. Branch clusters retain their tree and reserve room for collapse. Rounded connections avoid cards and cluster titles, with separate terminals and arrowheads. Dragging and collapse reroute connections, and Fit includes their outer routes and labels.
+- **Graph options → Relayout** clears manual positions and cluster offsets while preserving collapse and reading state. **Undo relayout** restores the last placement until a later drag, collapse, Reset, or scope switch; repeated Relayout keeps the useful undo. Topic changes still require **Save arrangement** to share through the Host.
 - Use wheel zoom, background-drag panning, fit, 100%, relayout, reset, Viewed Session location, or the minimap. The minimap appears when content leaves the visible surface and is hidden in narrow containers. Resizing preserves the current content center and scale.
 - Filter by title; Enter centers the first match and Escape clears the filter.
 - Hover a node or edge to emphasize its Branch Lineage.
@@ -417,7 +419,7 @@ The package exports two Node-facing entries and one lazy browser module. Every J
 
 ## Implementation
 
-`GraphView` reads the Viewed Session, Workspace membership, session summaries, and pending-interaction map. Indexed pure helpers derive Session Clusters, Branch and Merge edges, Subagent Summaries, cross-cluster ordering, layout, snapping, Title Filter matches, and viewport state. A separate presentation pipeline applies node positions, collapse state, and cluster offsets before `GraphCanvas` renders the result. The Host exposes separate package-owned Remotes for read-only Session Digests and atomic Session Merge capture. Merge submission revalidates Host truth, queues an explicit marker and canonical references, waits for the matching projection, then writes the Projection Cache before reporting success.
+`GraphView` reads the Viewed Session, Workspace membership, session summaries, and pending-interaction map. Indexed pure helpers derive Session Clusters, Branch and Merge edges, Subagent Summaries, cross-cluster ordering, layout, snapping, Title Filter matches, and viewport state. A separate presentation pipeline applies node positions, collapse state, and cluster offsets, then routes edges around the final cards and visible frame titles before `GraphCanvas` renders the result. The Host exposes separate package-owned Remotes for read-only Session Digests and atomic Session Merge capture. Merge submission revalidates Host truth, queues an explicit marker and canonical references, waits for the matching projection, then writes the Projection Cache before reporting success.
 
 | File | Responsibility |
 |---|---|
@@ -437,8 +439,9 @@ The package exports two Node-facing entries and one lazy browser module. Every J
 | [`src/client/session-merge-remote.ts`](src/client/session-merge-remote.ts) | Strict browser Session Merge Remote request/result contract |
 | [`src/client/graph-model.ts`](src/client/graph-model.ts) | Graph Scope resolution, Branch and Merge edges, Session Cluster ordering, Subagent Summaries, Title Filter matches, and Branch Lineages |
 | [`src/client/canvas-presentation.ts`](src/client/canvas-presentation.ts) | Ordered Session Arrangement projection and final/automatic content bounds |
-| [`src/client/layout.ts`](src/client/layout.ts) and [`src/client/clusters.ts`](src/client/clusters.ts) | Tree coordinates, frames, collapse, offsets, and edge paths |
+| [`src/client/layout.ts`](src/client/layout.ts) and [`src/client/clusters.ts`](src/client/clusters.ts) | Branch coordinates, dependency placement, frames, collapse, and offsets |
 | [`src/client/viewport.ts`](src/client/viewport.ts), [`src/client/preview-placement.ts`](src/client/preview-placement.ts), and [`src/client/snap.ts`](src/client/snap.ts) | Zoom, pan, resize preservation, fit, minimap/preview placement, and alignment guides |
+| [`src/client/edge-routing.ts`](src/client/edge-routing.ts) | Final obstacle routing, relation terminals, arrows, labels, and complete route bounds |
 | [`src/client/layout-store.ts`](src/client/layout-store.ts) | Per-scope Session Arrangement persistence, migration, and fail-soft storage recovery |
 
 ## Current limitations

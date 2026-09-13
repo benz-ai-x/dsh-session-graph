@@ -159,8 +159,8 @@ describe('empty graph', () => {
   })
 })
 
-describe('cluster vertical stacking', () => {
-  it('stacks clusters top to bottom in display order without overlap', () => {
+describe('disconnected cluster packing', () => {
+  it('packs independent clusters in display order without overlap', () => {
     const laid = layoutSessionGraph(graphFor({
       aRoot: session('aRoot', { updatedAt: 900 }),
       aChild: session('aChild', { parentId: id('aRoot'), updatedAt: 800 }),
@@ -169,15 +169,13 @@ describe('cluster vertical stacking', () => {
     }))
     const xOf = (key: string): number => laid.nodes.find(node => node.key === key)?.x ?? -1
     const yOf = (key: string): number => laid.nodes.find(node => node.key === key)?.y ?? -1
-    // Cluster a (root plus one child) occupies the first 164px; b and c
-    // follow with one gap each, all sharing the left column.
     expect(xOf('aRoot')).toBe(0)
     expect(yOf('aRoot')).toBe(0)
     expect(yOf('aChild')).toBe(DEPTH_PITCH)
-    expect(xOf('bRoot')).toBe(0)
-    expect(yOf('bRoot')).toBe(DEPTH_PITCH + CARD_H + CLUSTER_GAP)
-    expect(yOf('cRoot')).toBeGreaterThan(yOf('bRoot') + CARD_H)
-    expect(laid.width).toBe(NODE_W)
+    expect(xOf('bRoot')).toBe(NODE_W + CLUSTER_GAP)
+    expect(yOf('bRoot')).toBe(0)
+    expect(xOf('cRoot')).toBeGreaterThan(xOf('bRoot') + NODE_W)
+    expect(laid.width).toBe(3 * NODE_W + 2 * CLUSTER_GAP)
   })
 
   it('reserves enough vertical room for a wide cluster compacted into one column', () => {
@@ -187,10 +185,11 @@ describe('cluster vertical stacking', () => {
       b: session('b', { parentId: id('root'), updatedAt: 700 }),
       c: session('c', { parentId: id('root'), updatedAt: 600 }),
       lone: session('lone', { updatedAt: 500 }),
+      nextRow: session('nextRow', { updatedAt: 400 }),
     })
     const laid = layoutSessionGraph(graph)
     const rootY = laid.nodes.find(node => node.key === 'root')?.y ?? -1
-    const loneY = laid.nodes.find(node => node.key === 'lone')?.y ?? -1
+    const loneY = laid.nodes.find(node => node.key === 'nextRow')?.y ?? -1
     expect(loneY - rootY).toBeGreaterThanOrEqual(3 * COLLAPSED_ROW + CARD_H + CLUSTER_GAP)
   })
 })

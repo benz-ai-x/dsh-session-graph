@@ -202,6 +202,8 @@ Session、LLM 和浏览器运行时服务仍由所选 dsh profile 持有。插�
 - 拖动节点或整个簇框来排列画布；对齐参考线会吸附临近卡片边缘。快速拖动后重新打开图谱，也会保留松手时的最终位置。
 - Session Arrangement 持久化采用 fail-soft 策略。浏览器存储不可用、被拒绝、损坏或空间耗尽时，实时图谱仍会使用自动几何继续渲染。
 - 小圆点表示关系连接位置，不是拖动手柄；Branch 使用中性色带方向实线，Merge Relation 使用品牌色带方向实线，Subagent Derivation 使用虚线。
+- 工作区和研究主题都按依赖关系排列：相关来源保持同排，共同结果位于下方，独立资料另行排放。Branch 簇保留树形结构，并预留折叠所需空间。圆角连线会避开卡片和簇标题，使用分开的端口和箭头；拖动、折叠后重新绕线，“适应”也会包含外侧路线和标签。
+- **图谱选项 → 重新布局**清除手动节点位置和簇偏移，保留折叠及阅读状态。**撤销重新布局**可恢复上一次排列，直到后续拖动、折叠、重置或切换范围；连续点击重新布局仍保留有效撤销。主题排列仍需点击**保存排列**才会通过 Host 共享。
 - 使用滚轮缩放、背景拖动平移、适应、100%、重新布局、重置、定位 Viewed Session（当前查看会话）或 minimap。内容离开可视范围时才显示 minimap；容器尺寸变化会保留当前内容中心与缩放比例。
 - 按标题过滤；Enter 居中第一个匹配项，Escape 清空过滤条件。
 - 悬停节点或边会强调对应的 Branch Lineage（分支谱系）。
@@ -435,8 +437,9 @@ pnpm preview:dsh --stop
 | [`src/client/session-merge-remote.ts`](src/client/session-merge-remote.ts) | 严格的浏览器 Session Merge Remote 请求/结果契约 |
 | [`src/client/graph-model.ts`](src/client/graph-model.ts) | 图谱范围解析、Branch 与 Merge 边、Session Cluster 排序、Subagent Summary、Title Filter 匹配与 Branch Lineage |
 | [`src/client/canvas-presentation.ts`](src/client/canvas-presentation.ts) | 有序 Session Arrangement 投影以及最终/自动内容边界 |
-| [`src/client/layout.ts`](src/client/layout.ts) 与 [`src/client/clusters.ts`](src/client/clusters.ts) | 树坐标、簇框、折叠、偏移与边路径 |
+| [`src/client/layout.ts`](src/client/layout.ts) 与 [`src/client/clusters.ts`](src/client/clusters.ts) | Branch 坐标、依赖排列、簇框、折叠与偏移 |
 | [`src/client/viewport.ts`](src/client/viewport.ts)、[`src/client/preview-placement.ts`](src/client/preview-placement.ts) 与 [`src/client/snap.ts`](src/client/snap.ts) | 缩放、平移、尺寸保持、适应、minimap/预览定位与对齐参考线 |
+| [`src/client/edge-routing.ts`](src/client/edge-routing.ts) | 最终避障路由、关系端口、箭头、标签与完整路线边界 |
 | [`src/client/layout-store.ts`](src/client/layout-store.ts) | 按范围的 Session Arrangement 持久化、迁移与 fail-soft 存储恢复 |
 
 ## 当前限制

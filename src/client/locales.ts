@@ -108,6 +108,7 @@ export type SessionGraphKey =
   | 'toolbar.label'
   | 'toolbar.fit'
   | 'toolbar.relayout'
+  | 'toolbar.undoRelayout'
   | 'toolbar.reset'
   | 'toolbar.locate'
   | 'toolbar.merge'
@@ -301,6 +302,7 @@ export const zh: Record<SessionGraphKey, string> = {
   'toolbar.label': '画布工具',
   'toolbar.fit': '适应',
   'toolbar.relayout': '重新布局',
+  'toolbar.undoRelayout': '撤销重新布局',
   'toolbar.reset': '重置布局',
   'toolbar.locate': '定位',
   'toolbar.merge': '汇聚所选会话',
@@ -488,6 +490,7 @@ export const en: Record<SessionGraphKey, string> = {
   'toolbar.label': 'Canvas tools',
   'toolbar.fit': 'Fit',
   'toolbar.relayout': 'Relayout',
+  'toolbar.undoRelayout': 'Undo relayout',
   'toolbar.reset': 'Reset layout',
   'toolbar.locate': 'Locate',
   'toolbar.merge': 'Merge sessions',

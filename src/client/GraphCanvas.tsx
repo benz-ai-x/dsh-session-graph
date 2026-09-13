@@ -38,6 +38,7 @@ import { snapPosition } from './snap.ts'
 import type { GraphViewInjected } from './GraphView.tsx'
 import type { LaidOutFrame } from './clusters.ts'
 import { deriveCanvasPresentation } from './canvas-presentation.ts'
+import type { ConnectionPort } from './edge-routing.ts'
 import {
   fitViewport, initialViewport, minimapProjection, panBy, resizeViewport, zoomAt,
 } from './viewport.ts'
@@ -155,9 +156,10 @@ interface NodeGestureHandlers {
 /** One Canvas Session card: title-first hierarchy, state, metadata, and terminals. */
 function NodeCard({
   laid, now, t, gestures, clusterColor, selected, onHoverBadge, badgeHovered,
-  dimClass, onHoverNode, mergeOrder,
+  dimClass, onHoverNode, mergeOrder, ports,
 }: {
   laid: LaidOutNode
+  ports: readonly ConnectionPort[]
   now: number
   t: Translate
   gestures: NodeGestureHandlers
@@ -237,20 +239,14 @@ function NodeCard({
           ? null
           : <span className={styles.mergeSelectionOrder} aria-hidden="true">{mergeOrder}</span>}
       </button>
-      <span
+      {ports.map(port => <span
+        key={port.id}
         className={clsx(styles.nodePort, dimClass)}
-        style={{ left: `${x + NODE_W / 2}px`, top: `${y}px` }}
-        data-session-port={node.kind === 'knowledge' ? undefined : 'input'}
-        data-port-id={`${key}:input`}
+        style={{ left: `${port.x}px`, top: `${port.y}px` }}
+        data-session-port={node.kind === 'knowledge' ? undefined : port.direction}
+        data-port-id={`${key}:${port.id}`}
         aria-hidden="true"
-      />
-      <span
-        className={clsx(styles.nodePort, dimClass)}
-        style={{ left: `${x + NODE_W / 2}px`, top: `${y + CARD_H}px` }}
-        data-session-port={node.kind === 'knowledge' ? undefined : 'output'}
-        data-port-id={`${key}:output`}
-        aria-hidden="true"
-      />
+      />)}
     </>
   )
 }
@@ -810,6 +806,7 @@ export function GraphCanvas({
   const [positions, setPositions] = useState<Record<string, NodePosition>>({})
   const [collapsed, setCollapsed] = useState<readonly string[]>([])
   const [offsets, setOffsets] = useState<Record<string, ClusterOffset>>({})
+  const [relayoutUndo, setRelayoutUndo] = useState<LayoutState | null>(null)
   const [restoredArrangementKey, setRestoredArrangementKey] = useState<string | null>(null)
   const positionsRef = useRef(positions)
   positionsRef.current = positions
@@ -919,6 +916,7 @@ export function GraphCanvas({
   // record leaves the automatic arrangement in place.
   useEffect(() => {
     const stored = topic?.arrangement ?? loadArrangement(arrangement)
+    setRelayoutUndo(null)
     setPositions(stored?.positions ?? {})
     setCollapsed(stored?.collapsed ?? [])
     setOffsets(stored?.offsets ?? {})
@@ -957,6 +955,15 @@ export function GraphCanvas({
     if (best === undefined) return
     document.querySelector<HTMLElement>(`[data-node-id="${best.key}"]`)?.focus()
   }
+  const edgeLabels = useMemo(() => {
+    const labels = new Map<string, { readonly edgeId: string; readonly count: number }>()
+    for (const { edge } of laid.edges) {
+      if (edge.kind !== 'synthesis') continue
+      const previous = labels.get(edge.to)
+      labels.set(edge.to, { edgeId: previous?.edgeId ?? edge.id, count: (previous?.count ?? 0) + 1 })
+    }
+    return new Map([...labels.values()].map(label => [label.edgeId, t('synthesis.relationCount', { count: label.count })]))
+  }, [laid, t])
   const { shown, frames, bounds, automaticBounds } = useMemo(
     () => deriveCanvasPresentation({
       laid,
@@ -964,19 +971,11 @@ export function GraphCanvas({
       positions,
       collapsed: collapsedSet,
       offsets,
+      labels: edgeLabels,
     }),
-    [laid, positions, clusters, collapsedSet, offsets],
+    [laid, positions, clusters, collapsedSet, offsets, edgeLabels],
   )
   const shownByKey = useMemo(() => new Map(shown.nodes.map(node => [node.key, node])), [shown])
-  const synthesisLabels = useMemo(() => {
-    const labels = new Map<string, { readonly edgeId: string; readonly count: number }>()
-    for (const { edge } of shown.edges) {
-      if (edge.kind !== 'synthesis') continue
-      const previous = labels.get(edge.to)
-      labels.set(edge.to, { edgeId: previous?.edgeId ?? edge.id, count: (previous?.count ?? 0) + 1 })
-    }
-    return labels
-  }, [shown])
   useEffect(() => {
     if (restoredArrangementKey !== arrangement.key || fittedRef.current) return
     // The conversation shell measures its composer after the first paint.
@@ -1066,6 +1065,7 @@ export function GraphCanvas({
     nextCollapsed: readonly string[],
     nextOffsets: Record<string, ClusterOffset>,
   ): void => {
+    setRelayoutUndo(null)
     const knownNodes = new Set(shown.nodes.map(node => node.key))
     const knownClusters = new Set<string>(clusters.map(cluster => cluster.rootId))
     const state: LayoutState = {
@@ -1268,9 +1268,22 @@ export function GraphCanvas({
 
   /** Re-run the auto layout: manual positions and cluster offsets clear, collapsed clusters keep. */
   const relayout = (): void => {
+    // A repeated click must retain the last useful undo, not replace it with
+    // the already automatic arrangement.
+    const previous = Object.keys(positionsRef.current).length || Object.keys(offsetsRef.current).length
+      ? { positions: positionsRef.current, collapsed: collapsedRef.current, offsets: offsetsRef.current }
+      : relayoutUndo
     setPositions({})
     setOffsets({})
     persist({}, collapsedRef.current, {})
+    setRelayoutUndo(previous)
+  }
+
+  const undoRelayout = (): void => {
+    if (relayoutUndo === null) return
+    setPositions({ ...relayoutUndo.positions })
+    setOffsets({ ...relayoutUndo.offsets })
+    persist(relayoutUndo.positions, collapsedRef.current, relayoutUndo.offsets)
   }
 
   /** Back to the initial state: manual layout and collapse cleared, then fit. */
@@ -1546,10 +1559,7 @@ export function GraphCanvas({
           style={{ left: `${shown.x}px`, top: `${shown.y}px` }}
           aria-hidden="true"
         >
-          {shown.edges.map(({ edge, path }) => {
-            const to = shownByKey.get(edge.to)
-            if (to === undefined) return null
-            const cx = to.x + NODE_W / 2
+          {shown.edges.map(({ edge, path, arrowPath, label }) => {
             const merge = edge.kind === 'merge'
             return (
               <g
@@ -1575,11 +1585,11 @@ export function GraphCanvas({
                 />
                 {edge.kind === 'reuse' ? <title>{t('workbench.reuseEdge')}{edge.reuse?.revisionNumber === undefined ? '' : ` · ${t('knowledge.versionNumber', { number: edge.reuse.revisionNumber })}`}</title> : null}
                 {edge.kind === 'synthesis' ? <title>{t('synthesis.relation')} · {t('knowledge.versionNumber', { number: edge.synthesis?.revisionNumber })}</title> : null}
-                {synthesisLabels.get(edge.to)?.edgeId === edge.id ? <text className={styles.edgeLabel} textAnchor="middle"
-                  x={cx} y={to.y - 16}>{t('synthesis.relationCount', { count: synthesisLabels.get(edge.to)!.count })}</text> : null}
+                {label ? <text className={styles.edgeLabel} textAnchor="middle" dominantBaseline="central"
+                  x={label.x} y={label.y}>{label.text}</text> : null}
                 <path
                   className={merge ? styles.edgeMergeArrow : styles.edgeBranchArrow}
-                  d={`M ${cx - 6} ${to.y - 9} L ${cx} ${to.y} L ${cx + 6} ${to.y - 9} Z`}
+                  d={arrowPath}
                 />
               </g>
             )
@@ -1621,6 +1631,7 @@ export function GraphCanvas({
           <NodeCard
             key={laidNode.key}
             laid={laidNode}
+            ports={shown.ports.get(laidNode.key) ?? []}
             now={now}
             t={t}
             gestures={nodeGestures(laidNode.node.id, laidNode.node.clusterId, laidNode.x, laidNode.y)}
@@ -1720,6 +1731,7 @@ export function GraphCanvas({
             }}>{t('toolbar.locate')}</button>
           </div>
           <button type="button" onClick={relayout}>{t('toolbar.relayout')}</button>
+          {relayoutUndo === null ? null : <button type="button" onClick={undoRelayout}>{t('toolbar.undoRelayout')}</button>}
           <button type="button" onClick={reset}>{t('toolbar.reset')}</button>
           {topic?.actions}
           {topic === undefined ? <button

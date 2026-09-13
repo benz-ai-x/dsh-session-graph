@@ -1,0 +1,9 @@
+# Route research relations after Session Arrangement
+
+Workspace and Research Topic graphs use one synchronous dependency layout over intact Branch clusters. Strongly connected components retain a stable internal order and all actual directed relations; only disconnected components may wrap. Both expanded and compact cluster sizes reserve space. Placement reduces avoidable crossings without treating Merge, source, reuse, or synthesis relations as Branch lineage.
+
+The canvas presentation seam routes connections after manual positions, collapse, and whole-cluster offsets. It returns paths, relation terminals, arrowheads, labels, and complete bounds together. Short orthogonal channels use a spatial obstacle index; blocked routes use a bounded rectilinear search. Manual card overlap can make a terminal unreachable, in which case the relation remains visible and Relayout restores spacing. Arbitrarily dense graphs may still have crossings.
+
+We evaluated ELK Layered 0.12.0: its bundled browser file was 1,609,707 bytes, and local 4/100/1,000-node examples took 31/25/135 ms. Its Promise/worker layout integration would not replace the fixed-position rerouting needed after every drag, so this change keeps the existing synchronous pipeline and adds no runtime dependency. See the [ELK integration notes](https://github.com/kieler/elkjs) and [Layered capabilities](https://eclipse.dev/elk/reference/algorithms/org-eclipse-elk-layered.html). These measurements are local observations, not a browser performance guarantee.
+
+Relayout keeps one in-memory undo of manual placement. Repeating it preserves the useful undo; another committed arrangement action or scope change expires it. Selection, reading state, and collapse remain intact. Topic changes remain local drafts until explicit Save arrangement, as in ADR 0006 and ADR 0010.
